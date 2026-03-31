@@ -118,6 +118,13 @@ brew install ffmpeg
 sudo apt install ffmpeg
 ```
 
+#### Dolby Encoding (DEE / deew)
+
+Dolby ses kodlaması (Dolby Audio Encoding) yapmak istiyorsanız, FFmpeg'e ek olarak **deew** kullanabilirsiniz. `deew`, Dolby Encoding Engine (DEE) için açık kaynaklı bir Python sarmalayıcısıdır.
+- **deew Projesi:** [https://github.com/pcroland/deew](https://github.com/pcroland/deew)
+
+Kurulum ve kullanım detayları için ilgili depoyu inceleyebilirsiniz.
+
 ### 📖 Kullanım Kılavuzu
 
 1. **Kaynak Ses Seçimi**: "DOSYA SEÇ" butonuyla referans ses dosyasını seçin
@@ -257,6 +264,12 @@ brew install ffmpeg
 # Linux (Ubuntu/Debian)
 sudo apt install ffmpeg
 ```
+#### Dolby Encoding (DEE / deew)
+
+If you want to perform Dolby Audio Encoding, you can use **deew** in addition to FFmpeg. `deew` is an open-source Python wrapper for the Dolby Encoding Engine (DEE).
+- **deew Project:** [https://github.com/pcroland/deew](https://github.com/pcroland/deew)
+
+Please visit the official repository for more details on installation and usage.
 
 ### 📖 Usage Guide
 
