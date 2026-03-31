@@ -44,10 +44,7 @@ Audio Sync Tool, iki ses dosyası arasındaki gecikmeyi otomatik olarak tespit e
 
 ### 🖥️ Ekran Görüntüsü
 
-```
-<img width="902" height="1338" alt="2026-03-31 05_31_56-Audio Sync Tool" src="https://github.com/user-attachments/assets/09a867d6-92c0-46e7-8790-591063270e49" />
-
-```
+<img width="902" height="1338" alt="2026-03-31 05_31_56-Audio Sync Tool" src="https://github.com/user-attachments/assets/c2551a54-b1ae-4bb1-a7b4-7e632b21362d" />
 
 ### 📋 Sistem Gereksinimleri
 
@@ -172,10 +169,7 @@ Audio Sync Tool is a professional tool that automatically detects and synchroniz
 
 ### 🖥️ Screenshot
 
-```
-<img width="902" height="1338" alt="2026-03-31 05_31_34-Audio Sync Tool" src="https://github.com/user-attachments/assets/c15c44a5-8dfc-432b-86a7-f5a9e1f7c203" />
-
-```
+<img width="902" height="1338" alt="2026-03-31 05_31_34-Audio Sync Tool" src="https://github.com/user-attachments/assets/a1c300d1-c5e5-44ff-b86f-73d17aa0bd23" />
 
 ### 📋 System Requirements
 
