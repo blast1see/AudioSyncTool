@@ -45,27 +45,8 @@ Audio Sync Tool, iki ses dosyası arasındaki gecikmeyi otomatik olarak tespit e
 ### 🖥️ Ekran Görüntüsü
 
 ```
-┌──────────────────────────────────────────┐
-│  AUDIO SYNC                         🌐  │
-│  Sağlam gecikme tespiti & senkronizasyon │
-│──────────────────────────────────────────│
-│  ● KAYNAK SES (referans)                 │
-│    film_audio_original.wav               │
-│           [DOSYA SEÇ]                    │
-│──────────────────────────────────────────│
-│  ● SENKRONİZE EDİLECEK SES              │
-│    dubbed_audio_v2.wav                   │
-│           [DOSYA SEÇ]                    │
-│──────────────────────────────────────────│
-│  TESPİT AYARLARI                         │
-│  İlk farklı kısmı atla: [120] sn        │
-│  Tarama penceresi sayısı: [12]           │
-│──────────────────────────────────────────│
-│  SENKRONİZASYON MODU                     │
-│  MOD: [adelay + amix (Varsayılan)]       │
-│──────────────────────────────────────────│
-│  ⚡ SENKRONİZASYONU BAŞLAT               │
-└──────────────────────────────────────────┘
+<img width="902" height="1338" alt="2026-03-31 05_31_56-Audio Sync Tool" src="https://github.com/user-attachments/assets/09a867d6-92c0-46e7-8790-591063270e49" />
+
 ```
 
 ### 📋 Sistem Gereksinimleri
@@ -192,27 +173,8 @@ Audio Sync Tool is a professional tool that automatically detects and synchroniz
 ### 🖥️ Screenshot
 
 ```
-┌──────────────────────────────────────────┐
-│  AUDIO SYNC                         🌐  │
-│  Robust delay detection & sync           │
-│──────────────────────────────────────────│
-│  ● SOURCE AUDIO (reference)              │
-│    film_audio_original.wav               │
-│           [SELECT FILE]                  │
-│──────────────────────────────────────────│
-│  ● AUDIO TO SYNCHRONIZE                  │
-│    dubbed_audio_v2.wav                   │
-│           [SELECT FILE]                  │
-│──────────────────────────────────────────│
-│  DETECTION SETTINGS                      │
-│  Skip intro section: [120] sec           │
-│  Scan window count: [12]                 │
-│──────────────────────────────────────────│
-│  SYNCHRONIZATION MODE                    │
-│  MODE: [adelay + amix (Default)]         │
-│──────────────────────────────────────────│
-│  ⚡ START SYNCHRONIZATION                │
-└──────────────────────────────────────────┘
+<img width="902" height="1338" alt="2026-03-31 05_31_34-Audio Sync Tool" src="https://github.com/user-attachments/assets/c15c44a5-8dfc-432b-86a7-f5a9e1f7c203" />
+
 ```
 
 ### 📋 System Requirements
