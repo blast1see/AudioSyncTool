@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+*.spec
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Tools (download separately — see README)
+tools/*.exe
+tools/*.bin
+
+# Temp files
+*.tmp
+*.tmp.wav
+audiosync_*/
+
+# OS
+Thumbs.db
+.DS_Store
+Desktop.ini
+ehthumbs.db
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Backup files
+*_backup.py
+*_backup/
+
+# Audio test files (large)
+*.wav
+*.mp3
+*.flac
+*.ac3
+*.eac3
+*.dts
+!audio_sync.ico
+
+# Analysis docs (optional)
+audio_sync_analiz.md
