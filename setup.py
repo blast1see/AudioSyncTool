@@ -45,6 +45,7 @@ def build_exe() -> None:
         "--hidden-import", "audio_sync.ui",
         "--hidden-import", "audio_sync.ui.app",
         "--hidden-import", "audio_sync.ui.drop_zone",
+        "--hidden-import", "audio_sync.ui.stream_dialog",
         # Qt binding cakismalarini onle
         "--exclude-module", "PyQt5",
         "--exclude-module", "PyQt6",
