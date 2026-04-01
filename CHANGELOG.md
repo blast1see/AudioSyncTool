@@ -39,6 +39,11 @@
 #### Documentation
 - Complete bilingual README system: `README.md` (language selector), `README_EN.md`, `README_TR.md`
 - Added `CHANGELOG.md` (this file)
+- Added `RELEASE_NOTES.md` for GitHub release descriptions
+- Cross-linked CHANGELOG from all README files
+
+#### Build
+- Added missing `audio_sync.ui.stream_dialog` hidden import to PyInstaller build script
 
 ### [2.0.0] - 2026-03-30
 
@@ -90,6 +95,11 @@
 #### Dokümantasyon
 - Tam iki dilli README sistemi: `README.md` (dil seçici), `README_EN.md`, `README_TR.md`
 - `CHANGELOG.md` eklendi (bu dosya)
+- GitHub sürüm açıklamaları için `RELEASE_NOTES.md` eklendi
+- Tüm README dosyalarından CHANGELOG'a çapraz bağlantı eklendi
+
+#### Derleme
+- PyInstaller derleme betiğine eksik `audio_sync.ui.stream_dialog` hidden import eklendi
 
 ### [2.0.0] - 2026-03-30
 
