@@ -1,7 +1,7 @@
-"""Ana uygulama penceresi — sadece UI koordinasyonu.
+"""Main application window — UI coordination only.
 
-İş mantığı ``core.analyzer`` ve ``core.ffmpeg_wrapper`` modüllerinde,
-yardımcı fonksiyonlar ``utils`` modülünde bulunur.
+Business logic resides in ``core.analyzer`` and ``core.ffmpeg_wrapper``,
+utility functions in ``utils``.
 """
 
 from __future__ import annotations
@@ -23,25 +23,32 @@ from audio_sync.config import (
     EncoderType,
     FFMPEG_AC3_BITRATES, FFMPEG_EAC3_BITRATES,
     FFMPEG_AC3_DEFAULT_BITRATE, FFMPEG_EAC3_DEFAULT_BITRATE,
+    CONTAINER_EXTENSIONS,
+    CODEC_EXTENSION_MAP,
 )
 from audio_sync.core.analyzer import AudioAnalyzer
 from audio_sync.core.deew_encoder import DeewEncoder, encode_wav_to_dolby
 from audio_sync.core.ffmpeg_wrapper import FFmpegWrapper
 from audio_sync.core.models import AnalysisResult, AudioInfo, OutputSampleRate, ProgressCallback
 from audio_sync.i18n import Language, I18n, get_i18n, t
-from audio_sync.ui.drop_zone import DropZone
+from audio_sync.ui.drop_zone import DropZone, is_dnd_available
+from audio_sync.ui.stream_dialog import ask_stream_selection
 from audio_sync.utils import parse_float, parse_int, validate_file, temporary_wav_files
 
+# Try to use tkinterdnd2 for drag & drop support
+_TkBase: type = tk.Tk
+try:
+    from tkinterdnd2 import TkinterDnD
+    _TkBase = TkinterDnD.Tk  # type: ignore[assignment]
+except ImportError:
+    pass
 
-class AudioSyncApp(tk.Tk):
-    """Audio Sync Tool ana penceresi.
 
-    Sorumluluklar:
-        - UI bileşenlerini oluşturma ve yönetme
-        - Kullanıcı etkileşimlerini iş mantığına yönlendirme
-        - İlerleme ve sonuçları gösterme
+class AudioSyncApp(_TkBase):  # type: ignore[misc]
+    """Audio Sync Tool main window.
 
-    İş mantığı ``AudioAnalyzer`` ve ``FFmpegWrapper`` sınıflarına delege edilir.
+    Uses tkinterdnd2.TkinterDnD.Tk as base when available for drag & drop,
+    otherwise falls back to standard tk.Tk.
     """
 
     def __init__(
@@ -1073,12 +1080,167 @@ class AudioSyncApp(tk.Tk):
     # ── Olay Yöneticileri ────────────────────────────────────────────────
 
     def _on_src_pick(self, path: str) -> None:
-        self._src_path = path
-        self._log(t("log_source", name=os.path.basename(path)))
+        ext = os.path.splitext(path)[1].lower()
+        if ext in CONTAINER_EXTENSIONS:
+            self._handle_container_async(path, "src")
+        else:
+            self._src_path = path
+            self._log(t("log_source", name=os.path.basename(path)))
 
     def _on_sync_pick(self, path: str) -> None:
-        self._sync_path = path
-        self._log(t("log_sync_file", name=os.path.basename(path)))
+        ext = os.path.splitext(path)[1].lower()
+        if ext in CONTAINER_EXTENSIONS:
+            self._handle_container_async(path, "sync")
+        else:
+            self._sync_path = path
+            self._log(t("log_sync_file", name=os.path.basename(path)))
+
+    # ── Container / MKV Handling (non-blocking) ──────────────────────────
+
+    def _handle_container_async(self, path: str, role: str) -> None:
+        """Handle container files without blocking the UI.
+
+        Phase 1 (background): probe audio streams with ffprobe.
+        Phase 2 (main thread): show stream selection dialog if needed.
+        Phase 3 (background): extract the selected audio stream.
+        Phase 4 (main thread): update UI with the extracted file.
+
+        Args:
+            path: Container file path.
+            role: "src" or "sync".
+        """
+        # Guard against concurrent extraction for the same role
+        if getattr(self, f"_extracting_{role}", False):
+            return
+        setattr(self, f"_extracting_{role}", True)
+
+        self._log(t("log_mkv_detected"))
+        log_key = "log_source" if role == "src" else "log_sync_file"
+        zone = self.zone_src if role == "src" else self.zone_sync
+
+        # Show loading state
+        zone._name_lbl.config(text=t("mkv_extracting"), fg=THEME.muted)
+
+        def _probe_thread() -> None:
+            """Background: probe streams."""
+            try:
+                streams = self._ffmpeg.probe_audio_streams(path)
+            except Exception:
+                streams = []
+            # Back to main thread for dialog
+            self.after(0, lambda: self._container_on_probed(path, role, streams))
+
+        threading.Thread(target=_probe_thread, daemon=True).start()
+
+    def _container_on_probed(
+        self, path: str, role: str, streams: list[dict[str, str]],
+    ) -> None:
+        """Main thread: handle probe results, show dialog if needed."""
+        zone = self.zone_src if role == "src" else self.zone_sync
+
+        if not streams:
+            messagebox.showwarning(t("mkv_select_title"), t("mkv_no_audio"))
+            zone._name_lbl.config(text=t("no_file_selected"), fg=THEME.muted)
+            setattr(self, f"_extracting_{role}", False)
+            return
+
+        # Single stream — auto-select
+        if len(streams) == 1:
+            stream_index = int(streams[0].get("index", 0))
+            self._log(t("mkv_single_stream"))
+        else:
+            # Multiple streams — show selection dialog (on main thread)
+            stream_index = ask_stream_selection(
+                self, streams, os.path.basename(path),
+            )
+            if stream_index is None:
+                zone._name_lbl.config(text=t("no_file_selected"), fg=THEME.muted)
+                setattr(self, f"_extracting_{role}", False)
+                return
+
+        # Find codec for the selected stream
+        codec = "unknown"
+        for s in streams:
+            if int(s.get("index", -1)) == stream_index:
+                codec = s.get("codec_name", "unknown")
+                break
+
+        # Start extraction in background
+        self._log(t("mkv_extracting"))
+        zone._name_lbl.config(text=t("mkv_extracting"), fg=THEME.muted)
+
+        def _extract_thread() -> None:
+            """Background: extract audio stream."""
+            out_ext = CODEC_EXTENSION_MAP.get(codec, ".mka")
+
+            fd, tmp_path = _tempfile_mod.mkstemp(
+                prefix=f"audiosync_{role}_", suffix=out_ext,
+            )
+            os.close(fd)
+
+            try:
+                self._ffmpeg.extract_audio_stream(path, tmp_path, stream_index)
+                # Back to main thread to update UI
+                self.after(0, lambda: self._container_on_extracted(
+                    tmp_path, role,
+                ))
+            except Exception as e:
+                self.after(0, lambda: self._container_on_extract_error(
+                    str(e), tmp_path, role,
+                ))
+
+        threading.Thread(target=_extract_thread, daemon=True).start()
+
+    def _container_on_extracted(self, tmp_path: str, role: str) -> None:
+        """Main thread: update UI after successful extraction."""
+        log_key = "log_source" if role == "src" else "log_sync_file"
+        zone = self.zone_src if role == "src" else self.zone_sync
+
+        self._log(t("mkv_extracted", name=os.path.basename(tmp_path)))
+        self._log(t(log_key, name=os.path.basename(tmp_path)))
+
+        if role == "src":
+            self._src_path = tmp_path
+        else:
+            self._sync_path = tmp_path
+
+        zone.set_file_external(tmp_path)
+
+        # Track temp file for cleanup
+        if not hasattr(self, "_container_temp_files"):
+            self._container_temp_files: list[str] = []
+        self._container_temp_files.append(tmp_path)
+
+        setattr(self, f"_extracting_{role}", False)
+
+    def _container_on_extract_error(
+        self, error: str, tmp_path: str, role: str,
+    ) -> None:
+        """Main thread: handle extraction error."""
+        zone = self.zone_src if role == "src" else self.zone_sync
+
+        self._log(t("mkv_extract_error", err=error))
+        zone._name_lbl.config(text=t("no_file_selected"), fg=THEME.muted)
+
+        if os.path.isfile(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+        setattr(self, f"_extracting_{role}", False)
+
+    # ── Cleanup ──────────────────────────────────────────────────────────
+
+    def destroy(self) -> None:
+        """Clean up temporary container extraction files on exit."""
+        for tmp in getattr(self, "_container_temp_files", []):
+            try:
+                if os.path.isfile(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+        super().destroy()
 
     # ── İş Mantığı Koordinasyonu ─────────────────────────────────────────
 

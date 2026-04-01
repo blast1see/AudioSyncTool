@@ -27,8 +27,8 @@ def _check_dependencies() -> None:
 
     if missing:
         print(
-            f"Eksik bağımlılıklar: {', '.join(missing)}\n"
-            f"Yüklemek için:\n"
+            f"Missing dependencies: {', '.join(missing)}\n"
+            f"To install:\n"
             f"  {sys.executable} -m pip install {' '.join(missing)}",
             file=sys.stderr,
         )
