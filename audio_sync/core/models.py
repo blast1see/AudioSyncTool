@@ -67,7 +67,7 @@ class OutputSampleRate:
         """
         if force_48k or src_sr != 48000 or sync_sr != 48000:
             return cls(rate=48000, label="48000 Hz")
-        return cls(rate=None, label="kaynağı koru (zaten 48 kHz)")
+        return cls(rate=None, label="keep source (already 48 kHz)")
 
 
 # ── Analiz Sonucu ────────────────────────────────────────────────────────────

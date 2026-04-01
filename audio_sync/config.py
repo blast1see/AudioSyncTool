@@ -27,22 +27,22 @@ class SyncMode(Enum):
         description_en: İngilizce açıklama.
     """
 
-    ADELAY_AMIX = ("adelay+amix", "adelay + amix (Varsayılan)",
+    ADELAY_AMIX = ("adelay+amix", "adelay + amix (Default)",
                    "Gecikme uygulama ve karıştırma — en güvenilir yöntem",
                    "Delay application and mixing — most reliable method")
     ARESAMPLE = ("aresample", "aresample",
                  "Örnekleme oranı tabanlı senkronizasyon",
                  "Sample rate based synchronization")
-    ATEMPO = ("atempo", "atempo (kırpma + ince ayar)",
+    ATEMPO = ("atempo", "atempo (trim + fine-tune)",
               "Kırpma tabanlı senkronizasyon — sessizlik boşluğu oluşturmaz",
               "Trim-based synchronization — no silence gaps")
-    RUBBERBAND = ("rubberband", "rubberband (yüksek kalite)",
+    RUBBERBAND = ("rubberband", "rubberband (high quality)",
                   "Kırpma + rubberband kalite iyileştirme (librubberband gerektirir)",
                   "Trim + rubberband quality enhancement (requires librubberband)")
     APAD = ("apad+atrim", "apad + atrim",
             "Sessizlik ekleme/kırpma tabanlı senkronizasyon",
             "Silence padding/trimming based synchronization")
-    ASYNCTS = ("asyncts", "asyncts (eski)",
+    ASYNCTS = ("asyncts", "asyncts (legacy)",
                "Otomatik ses senkronizasyonu (eski FFmpeg filtresi)",
                "Automatic audio sync (legacy FFmpeg filter)")
 
@@ -218,13 +218,22 @@ class SyncConfig:
 class DeewFormat(Enum):
     """Deew çıktı format seçenekleri."""
 
-    DD = ("dd", "AC3 (Dolby Digital)", ".ac3")
-    DDP = ("ddp", "EAC3 (Dolby Digital Plus)", ".eac3")
+    DD = ("dd", "AC3 (Dolby Digital)", ".ac3", ())
+    DDP = ("ddp", "EAC3 (Dolby Digital Plus)", ".eac3", (".ec3",))
 
-    def __init__(self, cli_value: str, display_name: str, extension: str) -> None:
+    def __init__(
+        self, cli_value: str, display_name: str, extension: str,
+        alt_extensions: tuple[str, ...] = (),
+    ) -> None:
         self.cli_value = cli_value
         self.display_name = display_name
         self.extension = extension
+        self.alt_extensions = alt_extensions
+
+    @property
+    def all_extensions(self) -> tuple[str, ...]:
+        """Birincil ve alternatif uzantıların tümünü döndürür."""
+        return (self.extension, *self.alt_extensions)
 
 
 class DeewDownmix(Enum):
@@ -245,7 +254,7 @@ class DeewDRC(Enum):
 
     FILM_LIGHT = ("film_light", "Film Light")
     FILM_STANDARD = ("film_standard", "Film Standard")
-    MUSIC_LIGHT = ("music_light", "Music Light (varsayılan)")
+    MUSIC_LIGHT = ("music_light", "Music Light (default)")
     MUSIC_STANDARD = ("music_standard", "Music Standard")
     SPEECH = ("speech", "Speech")
 
@@ -379,9 +388,30 @@ SYNC_CONFIG = SyncConfig()
 DEEW_CONFIG = DeewConfig()
 FPS_CONFIG = FpsConfig()
 
-# Desteklenen ses dosyası uzantıları
+# Supported audio file extensions
 SUPPORTED_AUDIO_EXTENSIONS_LIST: tuple[str, ...] = (
     ".wav", ".mp3", ".flac", ".aac", ".ogg", ".m4a",
-    ".ac3", ".eac3", ".dts", ".mka", ".opus", ".wma",
+    ".ac3", ".eac3", ".ec3", ".dts", ".mka", ".opus", ".wma",
 )
-SUPPORTED_AUDIO_EXTENSIONS: str = " ".join(f"*{ext}" for ext in SUPPORTED_AUDIO_EXTENSIONS_LIST)
+
+# Container formats that may contain multiple audio streams
+CONTAINER_EXTENSIONS: tuple[str, ...] = (
+    ".mkv", ".mp4", ".m4v", ".webm", ".ts", ".mts",
+)
+
+# All supported extensions (audio + containers)
+ALL_SUPPORTED_EXTENSIONS_LIST: tuple[str, ...] = (
+    *SUPPORTED_AUDIO_EXTENSIONS_LIST, *CONTAINER_EXTENSIONS,
+)
+SUPPORTED_AUDIO_EXTENSIONS: str = " ".join(
+    f"*{ext}" for ext in ALL_SUPPORTED_EXTENSIONS_LIST
+)
+
+# Codec name → file extension mapping (used for container stream extraction)
+CODEC_EXTENSION_MAP: dict[str, str] = {
+    "aac": ".aac", "ac3": ".ac3", "eac3": ".eac3",
+    "dts": ".dts", "flac": ".flac", "opus": ".opus",
+    "mp3": ".mp3", "vorbis": ".ogg", "pcm_s16le": ".wav",
+    "pcm_s24le": ".wav", "pcm_s32le": ".wav",
+    "truehd": ".thd",
+}

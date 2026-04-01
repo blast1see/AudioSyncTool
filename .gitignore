@@ -7,7 +7,6 @@ __pycache__/
 *.egg
 dist/
 build/
-*.spec
 
 # Virtual environments
 venv/
@@ -26,9 +25,10 @@ env/
 tools/*.exe
 tools/*.bin
 
-# Temp files
+# Temp / log files
 *.tmp
 *.tmp.wav
+*.log
 audiosync_*/
 
 # OS

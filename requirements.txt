@@ -4,5 +4,8 @@
 numpy>=1.24.0
 scipy>=1.10.0
 
-# Opsiyonel / Optional — exe derleme için / for exe compilation
+# Optional — drag & drop support
+# tkinterdnd2>=0.3.0
+
+# Optional — exe compilation
 # pyinstaller>=6.0.0

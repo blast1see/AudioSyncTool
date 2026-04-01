@@ -100,17 +100,18 @@ class DeewEncoder:
         deew_path = _find_deew_executable()
         if deew_path is None:
             raise OSError(
-                "'deew' bulunamadı. Lütfen deew'i yükleyin:\n"
+                "'deew' not found. Please install deew:\n"
                 "\n"
-                "  Yöntem 1 — pip ile:\n"
+                "  Method 1 — via pip:\n"
                 "    pip install deew\n"
                 "\n"
-                "  Yöntem 2 — Çalıştırılabilir dosya:\n"
-                "    https://github.com/pcroland/deew/releases adresinden\n"
-                "    deew.exe dosyasını indirip tools/ klasörüne koyun.\n"
+                "  Method 2 — Executable:\n"
+                "    Download deew.exe from\n"
+                "    https://github.com/pcroland/deew/releases\n"
+                "    and place it in the tools/ folder.\n"
                 "\n"
-                "  Not: Deew, Dolby Encoding Engine (DEE) gerektirir.\n"
-                "    DEE'nin kurulu ve yapılandırılmış olduğundan emin olun."
+                "  Note: Deew requires Dolby Encoding Engine (DEE).\n"
+                "    Make sure DEE is installed and configured."
             )
         return deew_path
 
@@ -161,7 +162,7 @@ class DeewEncoder:
 
         # Giriş dosyasını doğrula
         if not os.path.isfile(input_wav):
-            raise FileNotFoundError(f"Giriş WAV dosyası bulunamadı: {input_wav}")
+            raise FileNotFoundError(f"Input WAV file not found: {input_wav}")
 
         # Parametreleri belirle (argüman > config > varsayılan)
         effective_fmt = fmt or self._config.format
@@ -204,20 +205,23 @@ class DeewEncoder:
             if result.stdout:
                 for line in result.stdout.strip().splitlines()[-5:]:
                     progress_callback(f"deew: {line}")
+            if result.stderr:
+                for line in result.stderr.strip().splitlines()[-3:]:
+                    progress_callback(f"deew stderr: {line}")
 
         if result.returncode != 0:
-            stderr_msg = result.stderr[-600:] if result.stderr else "(stderr boş)"
+            stderr_msg = result.stderr[-600:] if result.stderr else "(stderr empty)"
             stdout_msg = result.stdout[-600:] if result.stdout else ""
             error_detail = stderr_msg or stdout_msg
             raise RuntimeError(
-                f"Deew encoding hatası (kod: {result.returncode}):\n{error_detail}"
+                f"Deew encoding error (code: {result.returncode}):\n{error_detail}"
             )
 
         # Çıktı dosyasını bul
         output_path = self._find_output_file(input_wav, output_dir, effective_fmt)
 
         if progress_callback:
-            progress_callback(f"Deew encoding tamamlandı: {os.path.basename(output_path)}")
+            progress_callback(f"Deew encoding completed: {os.path.basename(output_path)}")
 
         return output_path
 
@@ -283,13 +287,13 @@ class DeewEncoder:
             return subprocess.run(cmd, **kwargs)
         except subprocess.TimeoutExpired:
             raise RuntimeError(
-                "Deew encoding işlemi 10 dakika içinde tamamlanamadı. "
-                "Dosya çok büyük veya DEE yapılandırması hatalı olabilir."
+                "Deew encoding did not complete within 10 minutes. "
+                "The file may be too large or DEE configuration may be incorrect."
             )
         except FileNotFoundError:
             raise OSError(
-                f"'{cmd[0]}' çalıştırılamadı. Dosyanın var olduğundan "
-                f"ve çalıştırma izniniz olduğundan emin olun."
+                f"'{cmd[0]}' could not be executed. Make sure the file exists "
+                f"and you have execution permissions."
             )
 
     @staticmethod
@@ -301,6 +305,10 @@ class DeewEncoder:
         """Deew'in oluşturduğu çıktı dosyasını bulur.
 
         Deew, giriş dosyasının adını koruyarak uzantıyı değiştirir.
+        DEE bazen çıktıyı alt dizine, giriş dosyasının dizinine veya
+        farklı bir konuma yazabilir; ayrıca uzantı birincil (``.eac3``)
+        yerine alternatif (``.ec3``) olabilir.  Bu yüzden birden fazla
+        konum ve uzantı taranır.
 
         Args:
             input_wav: Giriş WAV dosyasının yolu.
@@ -315,45 +323,106 @@ class DeewEncoder:
         """
         if not os.path.isdir(output_dir):
             raise RuntimeError(
-                f"Deew çıktı dizini bulunamadı: {output_dir}"
+                f"Deew output directory not found: {output_dir}"
             )
 
         input_stem = Path(input_wav).stem
-        expected_ext = fmt.extension
-        expected_output = os.path.join(output_dir, f"{input_stem}{expected_ext}")
+        input_dir = str(Path(input_wav).parent)
+        # DEE, .eac3 yerine .ec3 uzantısı kullanabilir — tüm olası uzantıları tara
+        all_exts = fmt.all_extensions  # ör. (".eac3", ".ec3")
+        expected_output = os.path.join(output_dir, f"{input_stem}{fmt.extension}")
 
-        if os.path.isfile(expected_output):
-            return expected_output
+        def _has_valid_ext(filename: str) -> bool:
+            """Dosya adının geçerli uzantılardan birine sahip olup olmadığını kontrol eder."""
+            return any(filename.endswith(ext) for ext in all_exts)
 
-        # Deew bazen farklı adlandırma kullanabilir — dizinde ara
-        for f in os.listdir(output_dir):
-            if f.startswith(input_stem) and f.endswith(expected_ext):
-                return os.path.join(output_dir, f)
+        # 1. Tam eşleşme — beklenen yolda dosya var mı? (tüm uzantılar)
+        for ext in all_exts:
+            candidate = os.path.join(output_dir, f"{input_stem}{ext}")
+            if os.path.isfile(candidate):
+                return candidate
 
-        # Son çare: en yeni dosyayı bul — yalnızca son 120 saniye içinde
-        # oluşturulmuş dosyalar kabul edilir (eşzamanlılık koruması)
+        # 2. Giriş dosyasının dizininde kontrol — deew/DEE bazen çıktıyı
+        #    -o parametresini yok sayarak giriş dosyasının yanına yazar
+        if input_dir != output_dir:
+            for ext in all_exts:
+                input_dir_output = os.path.join(input_dir, f"{input_stem}{ext}")
+                if os.path.isfile(input_dir_output):
+                    warnings.warn(
+                        f"Deew output file found in input directory instead of -o directory: "
+                        f"{input_dir_output}",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                    return input_dir_output
+
+        # Aranacak dizinler: çıktı dizini + giriş dizini (farklıysa)
+        search_dirs = [output_dir]
+        if input_dir != output_dir and os.path.isdir(input_dir):
+            search_dirs.append(input_dir)
+
+        # 3. Düz dizinlerde ada göre arama (prefix + uzantı)
+        for search_dir in search_dirs:
+            try:
+                for f in os.listdir(search_dir):
+                    full = os.path.join(search_dir, f)
+                    if os.path.isfile(full) and f.startswith(input_stem) and _has_valid_ext(f):
+                        return full
+            except OSError:
+                pass
+
+        # 4. Alt dizinlerde rekürsif arama — DEE/deew bazen çıktıyı
+        #    alt klasöre (ör. output_dir/subfolder/) yazabilir
+        for search_dir in search_dirs:
+            for root, _dirs, files in os.walk(search_dir):
+                if root == search_dir:
+                    continue  # Düz dizin zaten tarandı (adım 3)
+                for f in files:
+                    if _has_valid_ext(f) and f.startswith(input_stem):
+                        return os.path.join(root, f)
+
+        # 5. Tüm arama dizinlerinde uzantıya göre en yeni dosya (son 120 sn)
         now = time.time()
         max_age_sec = 120.0
-        candidates = [
-            os.path.join(output_dir, f)
-            for f in os.listdir(output_dir)
-            if f.endswith(expected_ext)
-            and (now - os.path.getmtime(os.path.join(output_dir, f))) < max_age_sec
-        ]
+        candidates: list[str] = []
+        for search_dir in search_dirs:
+            for root, _dirs, files in os.walk(search_dir):
+                for f in files:
+                    if _has_valid_ext(f):
+                        full = os.path.join(root, f)
+                        try:
+                            if (now - os.path.getmtime(full)) < max_age_sec:
+                                candidates.append(full)
+                        except OSError:
+                            pass
+
         if candidates:
             warnings.warn(
-                f"Deew çıktı dosyası ada göre bulunamadı; son {max_age_sec:.0f}s içinde "
-                f"oluşturulan en yeni dosya fallback olarak kullanılıyor "
-                f"({len(candidates)} aday).",
+                f"Deew output file not found by name; using most recent file "
+                f"created in the last {max_age_sec:.0f}s as fallback "
+                f"({len(candidates)} candidates).",
                 RuntimeWarning,
                 stacklevel=2,
             )
             return max(candidates, key=os.path.getmtime)
 
+        # 6. Dizin içeriğini hata mesajına ekle (debug kolaylığı)
+        dir_contents: list[str] = []
+        for search_dir in search_dirs:
+            for root, _dirs, files in os.walk(search_dir):
+                for f in files:
+                    rel = os.path.relpath(os.path.join(root, f), search_dir)
+                    dir_contents.append(f"[{os.path.basename(search_dir)}] {rel}")
+
+        contents_str = "\n  ".join(dir_contents[:30]) if dir_contents else "(empty)"
+
         raise RuntimeError(
-            f"Deew çıktı dosyası bulunamadı.\n"
-            f"Beklenen: {expected_output}\n"
-            f"Dizin: {output_dir}"
+            f"Deew output file not found.\n"
+            f"Expected: {expected_output}\n"
+            f"Searched extensions: {', '.join(all_exts)}\n"
+            f"Output directory: {output_dir}\n"
+            f"Input directory: {input_dir}\n"
+            f"Directory contents:\n  {contents_str}"
         )
 
 
@@ -406,7 +475,7 @@ def encode_wav_to_dolby(
 
     try:
         if progress_callback:
-            progress_callback(f"Deew ile {fmt.display_name} encoding başlıyor…")
+            progress_callback(f"Starting {fmt.display_name} encoding with Deew…")
 
         # Encoding
         encoded_path = encoder.encode(
@@ -428,17 +497,17 @@ def encode_wav_to_dolby(
         _shutil.move(encoded_path, final_output_path)
 
         if progress_callback:
-            progress_callback(f"Çıktı dosyası taşındı: {os.path.basename(final_output_path)}")
+            progress_callback(f"Output file moved: {os.path.basename(final_output_path)}")
 
         # Ara WAV dosyasını sil
         if delete_wav and os.path.isfile(input_wav):
             try:
                 os.remove(input_wav)
                 if progress_callback:
-                    progress_callback("Ara WAV dosyası silindi.")
+                    progress_callback("Intermediate WAV file deleted.")
             except OSError:
                 if progress_callback:
-                    progress_callback("Uyarı: Ara WAV dosyası silinemedi.")
+                    progress_callback("Warning: Could not delete intermediate WAV file.")
 
         return final_output_path
 

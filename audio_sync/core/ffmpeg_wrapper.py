@@ -96,7 +96,7 @@ class FFmpegWrapper:
         for tool in ("ffmpeg", "ffprobe"):
             if shutil.which(tool) is None:
                 raise OSError(
-                    f"'{tool}' bulunamadı. Lütfen FFmpeg'i yükleyin:\n"
+                    f"'{tool}' not found. Please install FFmpeg:\n"
                     f"  https://ffmpeg.org/download.html\n"
                     f"  Windows: winget install ffmpeg\n"
                     f"  macOS:   brew install ffmpeg\n"
@@ -129,7 +129,7 @@ class FFmpegWrapper:
 
         if result.returncode != 0:
             warnings.warn(
-                f"FFprobe ses bilgisi okunamadı, varsayılan değerler kullanılıyor "
+                f"FFprobe could not read audio info, using defaults "
                 f"(32-bit, stereo, 48 kHz): {path}",
                 RuntimeWarning,
                 stacklevel=2,
@@ -150,7 +150,84 @@ class FFmpegWrapper:
             sample_rate=sample_rate,
         )
 
-    # ── Mono WAV Dönüşümü ───────────────────────────────────────────────
+    # ── Container / MKV Stream Probing ───────────────────────────────────
+
+    def probe_audio_streams(self, path: str) -> list[dict[str, str]]:
+        """Probe all audio streams in a container file (MKV, MP4, etc.).
+
+        Args:
+            path: Path to the container file.
+
+        Returns:
+            List of dicts with keys: index, codec_name, channels,
+            sample_rate, bit_rate, tags/language, tags/title.
+        """
+        import json as _json
+
+        cmd = [
+            "ffprobe",
+            "-v", "error",
+            "-select_streams", "a",
+            "-show_entries",
+            "stream=index,codec_name,channels,sample_rate,bit_rate,bits_per_raw_sample",
+            "-show_entries", "stream_tags=language,title",
+            "-of", "json",
+            path,
+        ]
+
+        result = self._run_command(cmd, timeout=self._config.ffprobe_timeout_sec)
+        if result.returncode != 0:
+            return []
+
+        try:
+            data = _json.loads(result.stdout)
+        except (ValueError, KeyError):
+            return []
+
+        streams: list[dict[str, str]] = []
+        for s in data.get("streams", []):
+            tags = s.get("tags", {})
+            streams.append({
+                "index": str(s.get("index", 0)),
+                "codec_name": s.get("codec_name", "unknown"),
+                "channels": str(s.get("channels", 0)),
+                "sample_rate": str(s.get("sample_rate", 0)),
+                "bit_rate": str(s.get("bit_rate", "N/A")),
+                "language": tags.get("language", "und"),
+                "title": tags.get("title", ""),
+            })
+        return streams
+
+    def extract_audio_stream(
+        self,
+        input_path: str,
+        output_path: str,
+        stream_index: int,
+    ) -> None:
+        """Extract a specific audio stream from a container file.
+
+        Args:
+            input_path: Path to the container file.
+            output_path: Path for the extracted audio file.
+            stream_index: FFmpeg stream index to extract.
+
+        Raises:
+            RuntimeError: If extraction fails.
+        """
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i", input_path,
+            "-map", f"0:{stream_index}",
+            "-c", "copy",
+            output_path,
+        ]
+        result = self._run_command(cmd, timeout=self._config.ffmpeg_timeout_sec)
+        if result.returncode != 0:
+            stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
+            raise RuntimeError(f"Audio stream extraction error:\n{stderr_tail}")
+
+    # ── Mono WAV Conversion ──────────────────────────────────────────────
 
     def to_wav_mono(self, src: str, out_path: str) -> None:
         """Senkron analizi için tek kanallı, düşük örneklemeli WAV hazırlar.
@@ -173,8 +250,8 @@ class FFmpegWrapper:
         ]
         result = self._run_command(cmd, timeout=self._config.ffmpeg_timeout_sec)
         if result.returncode != 0:
-            stderr_tail = result.stderr[-400:] if result.stderr else "(stderr boş)"
-            raise RuntimeError(f"Mono dönüşüm hatası:\n{stderr_tail}")
+            stderr_tail = result.stderr[-400:] if result.stderr else "(stderr empty)"
+            raise RuntimeError(f"Mono conversion error:\n{stderr_tail}")
 
     # ── FPS Dönüşümü ────────────────────────────────────────────────────
 
@@ -238,8 +315,8 @@ class FFmpegWrapper:
 
         result = self._run_command(cmd, timeout=self._config.ffmpeg_timeout_sec)
         if result.returncode != 0:
-            stderr_tail = result.stderr[-600:] if result.stderr else "(stderr boş)"
-            raise RuntimeError(f"FPS dönüşüm hatası:\n{stderr_tail}")
+            stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
+            raise RuntimeError(f"FPS conversion error:\n{stderr_tail}")
 
         return cmd_summary
 
@@ -311,8 +388,8 @@ class FFmpegWrapper:
 
         result = self._run_command(cmd, timeout=self._config.ffmpeg_timeout_sec)
         if result.returncode != 0:
-            stderr_tail = result.stderr[-600:] if result.stderr else "(stderr boş)"
-            raise RuntimeError(f"FFmpeg senkronizasyon hatası:\n{stderr_tail}")
+            stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
+            raise RuntimeError(f"FFmpeg synchronization error:\n{stderr_tail}")
 
         return cmd_summary
 
@@ -679,8 +756,8 @@ class FFmpegWrapper:
 
         result = self._run_command(cmd, timeout=self._config.ffmpeg_timeout_sec)
         if result.returncode != 0:
-            stderr_tail = result.stderr[-600:] if result.stderr else "(stderr boş)"
-            raise RuntimeError(f"FFmpeg Dolby encoding hatası:\n{stderr_tail}")
+            stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
+            raise RuntimeError(f"FFmpeg Dolby encoding error:\n{stderr_tail}")
 
         return cmd_summary
 
@@ -713,12 +790,12 @@ class FFmpegWrapper:
             )
         except subprocess.TimeoutExpired:
             raise RuntimeError(
-                f"'{cmd[0]}' komutu {timeout} saniye içinde tamamlanamadı. "
-                f"Dosya bozuk veya erişilemez olabilir."
+                f"'{cmd[0]}' command did not complete within {timeout} seconds. "
+                f"The file may be corrupted or inaccessible."
             )
         except FileNotFoundError:
             raise OSError(
-                f"'{cmd[0]}' bulunamadı. FFmpeg'in PATH'te olduğundan emin olun."
+                f"'{cmd[0]}' not found. Make sure FFmpeg is in your PATH."
             )
 
     @staticmethod
