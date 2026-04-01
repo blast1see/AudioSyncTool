@@ -217,6 +217,10 @@ Please make sure your code follows the existing style and includes appropriate d
 
 This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
 
+## 📋 Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for a detailed list of changes in each version.
+
 ---
 
 <div align="center">

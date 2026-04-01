@@ -20,4 +20,8 @@
 [![English](https://img.shields.io/badge/English-blue?style=for-the-badge)](README_EN.md)
 [![Türkçe](https://img.shields.io/badge/T%C3%BCrk%C3%A7e-red?style=for-the-badge)](README_TR.md)
 
+---
+
+📋 [Changelog](CHANGELOG.md) · 📝 [Release Notes](RELEASE_NOTES.md)
+
 </div>

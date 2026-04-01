@@ -217,6 +217,10 @@ Lütfen kodunuzun mevcut stile uygun olduğundan ve uygun dokümantasyon içerdi
 
 Bu proje **MIT Lisansı** altında lisanslanmıştır — detaylar için [LICENSE](LICENSE) dosyasına bakın.
 
+## 📋 Değişiklik Günlüğü
+
+Her sürümdeki değişikliklerin detaylı listesi için [CHANGELOG.md](CHANGELOG.md) dosyasına bakın.
+
 ---
 
 <div align="center">
