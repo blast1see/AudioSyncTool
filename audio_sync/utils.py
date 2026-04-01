@@ -122,11 +122,11 @@ def validate_file(path: str, label: str) -> None:
         ValueError: Dosya boşsa.
     """
     if not os.path.isfile(path):
-        raise FileNotFoundError(f"{label} dosyası bulunamadı: {path}")
+        raise FileNotFoundError(f"{label} file not found: {path}")
     if not os.access(path, os.R_OK):
-        raise PermissionError(f"{label} dosyası okunamıyor: {path}")
+        raise PermissionError(f"{label} file is not readable: {path}")
     if os.path.getsize(path) == 0:
-        raise ValueError(f"{label} dosyası boş: {path}")
+        raise ValueError(f"{label} file is empty: {path}")
 
 
 # ── Geçici Dosya Yönetimi ───────────────────────────────────────────────────

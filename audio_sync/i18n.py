@@ -421,6 +421,68 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "kaynağı koru (zaten 48 kHz)",
         "en": "keep source (already 48 kHz)",
     },
+
+    # ── MKV / Container Stream Selection ──
+    "mkv_select_title": {
+        "tr": "Ses Akışı Seçimi",
+        "en": "Audio Stream Selection",
+    },
+    "mkv_select_prompt": {
+        "tr": "Bu dosyada birden fazla ses akışı bulundu.\nLütfen kullanmak istediğiniz akışı seçin:",
+        "en": "Multiple audio streams found in this file.\nPlease select the stream you want to use:",
+    },
+    "mkv_stream_label": {
+        "tr": "#{idx}: {codec} | {ch}ch | {rate}Hz | {lang}{title}",
+        "en": "#{idx}: {codec} | {ch}ch | {rate}Hz | {lang}{title}",
+    },
+    "mkv_extracting": {
+        "tr": "Ses akışı çıkarılıyor…",
+        "en": "Extracting audio stream…",
+    },
+    "mkv_extracted": {
+        "tr": "Ses akışı çıkarıldı: {name}",
+        "en": "Audio stream extracted: {name}",
+    },
+    "mkv_no_audio": {
+        "tr": "Bu dosyada ses akışı bulunamadı.",
+        "en": "No audio streams found in this file.",
+    },
+    "mkv_extract_error": {
+        "tr": "Ses akışı çıkarma hatası: {err}",
+        "en": "Audio stream extraction error: {err}",
+    },
+    "mkv_single_stream": {
+        "tr": "Tek ses akışı tespit edildi, otomatik seçildi.",
+        "en": "Single audio stream detected, automatically selected.",
+    },
+    "log_mkv_detected": {
+        "tr": "Container dosyası tespit edildi, ses akışları taranıyor…",
+        "en": "Container file detected, scanning audio streams…",
+    },
+
+    # ── Drag & Drop ──
+    "drop_hint": {
+        "tr": "veya dosyayı buraya sürükleyin",
+        "en": "or drag & drop file here",
+    },
+    "drop_hover": {
+        "tr": "Dosyayı bırakın…",
+        "en": "Drop file here…",
+    },
+    "container_files": {
+        "tr": "Video/Container Dosyaları",
+        "en": "Video/Container Files",
+    },
+
+    # ── Common Buttons ──
+    "btn_ok": {
+        "tr": "Tamam",
+        "en": "OK",
+    },
+    "btn_cancel": {
+        "tr": "İptal",
+        "en": "Cancel",
+    },
 }
 
 
@@ -440,7 +502,7 @@ class I18n:
     """
 
     _instance: I18n | None = None
-    _language: Language = Language.TR
+    _language: Language = Language.EN
 
     def __new__(cls) -> I18n:
         if cls._instance is None:
