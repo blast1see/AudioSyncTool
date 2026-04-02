@@ -25,9 +25,19 @@ from audio_sync.config import (
     FFMPEG_AC3_DEFAULT_BITRATE, FFMPEG_EAC3_DEFAULT_BITRATE,
     CONTAINER_EXTENSIONS,
     CODEC_EXTENSION_MAP,
+    EncodingPipeline,
+    FFmpegOutputFormat,
+    FFmpegEncodeConfig,
+    QaacMode,
+    QaacConfig,
+    ToolPaths,
+    save_tool_paths,
+    TOOL_PATHS,
+    resolve_tool,
 )
 from audio_sync.core.analyzer import AudioAnalyzer
 from audio_sync.core.deew_encoder import DeewEncoder, encode_wav_to_dolby
+from audio_sync.core.encoder import QaacEncoder
 from audio_sync.core.ffmpeg_wrapper import FFmpegWrapper
 from audio_sync.core.models import AnalysisResult, AudioInfo, OutputSampleRate, ProgressCallback
 from audio_sync.i18n import Language, I18n, get_i18n, t
@@ -59,9 +69,9 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
     ) -> None:
         super().__init__()
         self.title("Audio Sync Tool")
-        self.geometry("900x700")
+        self.geometry("800x800")
         self.resizable(True, True)
-        self.minsize(600, 500)
+        self.minsize(700, 700)
         self.configure(bg=THEME.bg)
 
         # i18n
@@ -101,6 +111,25 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self.deew_dialnorm_var = tk.StringVar(value="0")
         self.deew_delete_wav_var = tk.BooleanVar(value=True)
 
+        # Encoding pipeline
+        self._encoding_pipeline_var = tk.StringVar(value=EncodingPipeline.NONE.value)
+
+        # FFmpeg encoding
+        self._ffmpeg_format_var = tk.StringVar(value=FFmpegOutputFormat.AAC.codec)
+        self._ffmpeg_aac_bitrate_var = tk.StringVar(value="256")
+        self._ffmpeg_flac_compression_var = tk.StringVar(value="5")
+        self._ffmpeg_flac_bit_depth_var = tk.StringVar(value="24")
+        self._ffmpeg_opus_bitrate_var = tk.StringVar(value="128")
+
+        # qaac encoding
+        self._qaac_mode_var = tk.StringVar(value=QaacMode.TVBR.flag)
+        self._qaac_tvbr_quality_var = tk.StringVar(value="91")
+        self._qaac_cvbr_bitrate_var = tk.StringVar(value="256")
+        self._qaac_abr_bitrate_var = tk.StringVar(value="256")
+        self._qaac_cbr_bitrate_var = tk.StringVar(value="256")
+        self._qaac_he_aac_var = tk.BooleanVar(value=False)
+        self._qaac_no_delay_var = tk.BooleanVar(value=True)
+
         # Dil seçimi
         self.language_var = tk.StringVar(value=self._i18n.language.display_name)
 
@@ -120,7 +149,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._build_options_panel()
         self._build_sync_mode_panel()
         self._build_fps_panel()
-        self._build_deew_panel()
+        self._build_encoding_panel()
         self._build_info_panel()
         self._build_log_panel()
         self.after(50, self._fit_to_content)
@@ -197,7 +226,21 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             title_frame, text="SYNC", font=FONTS.header, fg=THEME.accent2, bg=THEME.bg,
         ).pack(side="left")
 
-        # Sağ: Dil seçimi
+        # Sağ: Tool Paths button + Dil seçimi
+        self._tool_paths_btn = tk.Button(
+            hdr,
+            text=t("tool_paths_button"),
+            font=FONTS.small,
+            fg=THEME.text,
+            bg=THEME.card,
+            activebackground=THEME.card,
+            activeforeground=THEME.accent,
+            relief="flat",
+            cursor="hand2",
+            command=self._open_tool_paths_dialog,
+        )
+        self._tool_paths_btn.pack(side="right", padx=(0, 8))
+
         lang_frame = tk.Frame(hdr, bg=THEME.bg)
         lang_frame.pack(side="right")
         self._lang_label = tk.Label(
@@ -462,50 +505,20 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._on_fps_toggle()
         self._update_fps_ratio_label()
 
-    def _build_deew_panel(self) -> None:
-        """Dolby encoding ayarları panelini oluşturur (DEE ve FFmpeg desteği)."""
-        self._deew_frame = tk.Frame(
-            self._content, bg=THEME.card,
-            highlightbackground=THEME.border, highlightthickness=1,
-        )
-        self._deew_frame.pack(fill="x", padx=30, pady=(0, 14))
-
-        header_row = tk.Frame(self._deew_frame, bg=THEME.card)
-        header_row.pack(fill="x", padx=14, pady=(10, 4))
-
-        self._dolby_title_lbl = tk.Label(
-            header_row, text=t("dolby_encoding"), font=FONTS.small,
-            fg=THEME.muted, bg=THEME.card, anchor="w",
-        )
-        self._dolby_title_lbl.pack(side="left")
+    def _build_deew_panel(self, parent: tk.Frame) -> None:
+        """Build Dolby encoding settings into the given parent frame."""
+        # DEE status indicator
+        status_row = tk.Frame(parent, bg=THEME.card)
+        status_row.pack(fill="x", padx=14, pady=(6, 4))
 
         self._deew_status_lbl = tk.Label(
-            header_row, text="", font=FONTS.small,
-            bg=THEME.card, anchor="e",
+            status_row, text="", font=FONTS.small,
+            bg=THEME.card, anchor="w",
         )
-        self._deew_status_lbl.pack(side="right")
+        self._deew_status_lbl.pack(side="left")
         self._update_deew_status()
 
-        self._dolby_enable_cb = tk.Checkbutton(
-            self._deew_frame,
-            text=t("dolby_enable"),
-            variable=self.deew_enabled_var,
-            onvalue=True,
-            offvalue=False,
-            bg=THEME.card,
-            fg=THEME.text,
-            selectcolor=THEME.input_bg,
-            activebackground=THEME.card,
-            activeforeground=THEME.text,
-            font=FONTS.small,
-            anchor="w",
-            relief="flat",
-            highlightthickness=0,
-            command=self._on_deew_toggle,
-        )
-        self._dolby_enable_cb.pack(fill="x", padx=14, pady=(0, 6))
-
-        self._deew_settings_frame = tk.Frame(self._deew_frame, bg=THEME.card)
+        self._deew_settings_frame = tk.Frame(parent, bg=THEME.card)
         self._deew_settings_frame.pack(fill="x", padx=14, pady=(0, 10))
 
         # Encoder seçimi
@@ -696,11 +709,327 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self.deew_downmix_var.trace_add("write", self._on_deew_channel_change)
         self.encoder_type_var.trace_add("write", self._on_encoder_type_change)
 
-        self._on_deew_toggle()
         self._update_channel_options()
         self._update_bitrate_options()
         self._update_format_description()
         self._update_encoder_ui()
+
+    def _build_encoding_panel(self) -> None:
+        """Build the unified encoding pipeline panel."""
+        # Main card
+        card = tk.Frame(
+            self._content, bg=THEME.card,
+            highlightbackground=THEME.border, highlightthickness=1,
+        )
+        card.pack(fill="x", padx=30, pady=(0, 14))
+
+        # Title
+        self._encoding_title_lbl = tk.Label(
+            card, text=t("encoding_pipeline"), font=FONTS.label,
+            fg=THEME.accent, bg=THEME.card, anchor="w",
+        )
+        self._encoding_title_lbl.pack(fill="x", padx=14, pady=(10, 6))
+
+        # Pipeline selector row
+        sel_row = tk.Frame(card, bg=THEME.card)
+        sel_row.pack(fill="x", padx=14, pady=(0, 8))
+
+        self._encoding_pipeline_lbl = tk.Label(
+            sel_row, text=t("encoding_pipeline_label"), font=FONTS.small,
+            fg=THEME.text, bg=THEME.card,
+        )
+        self._encoding_pipeline_lbl.pack(side="left", padx=(0, 8))
+
+        pipeline_options = [
+            (EncodingPipeline.NONE.value, t("encoding_none")),
+            (EncodingPipeline.DOLBY.value, t("encoding_dolby")),
+            (EncodingPipeline.FFMPEG.value, t("encoding_ffmpeg")),
+            (EncodingPipeline.QAAC.value, t("encoding_qaac")),
+        ]
+
+        self._encoding_pipeline_menu = tk.OptionMenu(
+            sel_row, self._encoding_pipeline_var,
+            *[v for v, _ in pipeline_options],
+            command=self._on_encoding_pipeline_change,
+        )
+        self._encoding_pipeline_menu.config(
+            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+            highlightthickness=0, relief="flat", activebackground=THEME.accent,
+            activeforeground=THEME.bg,
+        )
+        self._encoding_pipeline_menu["menu"].config(
+            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+            activebackground=THEME.accent, activeforeground=THEME.bg,
+        )
+        self._encoding_pipeline_menu.pack(side="left", fill="x", expand=True)
+
+        # ── FFmpeg sub-panel ──
+        self._ffmpeg_enc_frame = tk.Frame(card, bg=THEME.card)
+
+        # FFmpeg format selector
+        ff_row1 = tk.Frame(self._ffmpeg_enc_frame, bg=THEME.card)
+        ff_row1.pack(fill="x", padx=14, pady=(0, 4))
+
+        self._ffmpeg_format_lbl = tk.Label(
+            ff_row1, text=t("encoding_format"), font=FONTS.small,
+            fg=THEME.text, bg=THEME.card,
+        )
+        self._ffmpeg_format_lbl.pack(side="left", padx=(0, 8))
+
+        ffmpeg_formats = [
+            (FFmpegOutputFormat.AAC.codec, t("ffmpeg_aac_label")),
+            (FFmpegOutputFormat.FLAC.codec, t("ffmpeg_flac_label")),
+            (FFmpegOutputFormat.OPUS.codec, t("ffmpeg_opus_label")),
+        ]
+
+        self._ffmpeg_format_menu = tk.OptionMenu(
+            ff_row1, self._ffmpeg_format_var,
+            *[v for v, _ in ffmpeg_formats],
+            command=self._on_ffmpeg_format_change,
+        )
+        self._ffmpeg_format_menu.config(
+            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+            highlightthickness=0, relief="flat",
+        )
+        self._ffmpeg_format_menu["menu"].config(
+            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+        )
+        self._ffmpeg_format_menu.pack(side="left", fill="x", expand=True)
+
+        # FFmpeg AAC bitrate
+        self._ffmpeg_aac_frame = tk.Frame(self._ffmpeg_enc_frame, bg=THEME.card)
+        self._ffmpeg_aac_frame.pack(fill="x", padx=14, pady=(0, 4))
+        self._ffmpeg_aac_bitrate_lbl = tk.Label(
+            self._ffmpeg_aac_frame, text=t("aac_bitrate_label"), font=FONTS.small,
+            fg=THEME.text, bg=THEME.card,
+        )
+        self._ffmpeg_aac_bitrate_lbl.pack(side="left", padx=(0, 8))
+        tk.Entry(
+            self._ffmpeg_aac_frame, textvariable=self._ffmpeg_aac_bitrate_var,
+            width=8, bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+            insertbackground=THEME.text, relief="flat",
+        ).pack(side="left")
+
+        # FFmpeg FLAC compression
+        self._ffmpeg_flac_frame = tk.Frame(self._ffmpeg_enc_frame, bg=THEME.card)
+        self._ffmpeg_flac_compression_lbl = tk.Label(
+            self._ffmpeg_flac_frame, text=t("ffmpeg_flac_compression_label"), font=FONTS.small,
+            fg=THEME.text, bg=THEME.card,
+        )
+        self._ffmpeg_flac_compression_lbl.pack(side="left", padx=(0, 8))
+        tk.Entry(
+            self._ffmpeg_flac_frame, textvariable=self._ffmpeg_flac_compression_var,
+            width=8, bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+            insertbackground=THEME.text, relief="flat",
+        ).pack(side="left")
+
+        # FFmpeg FLAC bit depth
+        self._ffmpeg_flac_bd_frame = tk.Frame(self._ffmpeg_enc_frame, bg=THEME.card)
+        self._ffmpeg_flac_bd_lbl = tk.Label(
+            self._ffmpeg_flac_bd_frame, text=t("flac_bit_depth_label"), font=FONTS.small,
+            fg=THEME.text, bg=THEME.card,
+        )
+        self._ffmpeg_flac_bd_lbl.pack(side="left", padx=(0, 8))
+
+        ffmpeg_bd_options = [("24", t("flac_24bit")), ("16", t("flac_16bit"))]
+        self._ffmpeg_flac_bd_menu = tk.OptionMenu(
+            self._ffmpeg_flac_bd_frame, self._ffmpeg_flac_bit_depth_var,
+            *[v for v, _ in ffmpeg_bd_options],
+        )
+        self._ffmpeg_flac_bd_menu.config(
+            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+            highlightthickness=0, relief="flat",
+        )
+        self._ffmpeg_flac_bd_menu["menu"].config(
+            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+        )
+        self._ffmpeg_flac_bd_menu.pack(side="left")
+
+        # FFmpeg Opus bitrate
+        self._ffmpeg_opus_frame = tk.Frame(self._ffmpeg_enc_frame, bg=THEME.card)
+        self._ffmpeg_opus_bitrate_lbl = tk.Label(
+            self._ffmpeg_opus_frame, text=t("opus_bitrate_label"), font=FONTS.small,
+            fg=THEME.text, bg=THEME.card,
+        )
+        self._ffmpeg_opus_bitrate_lbl.pack(side="left", padx=(0, 8))
+        tk.Entry(
+            self._ffmpeg_opus_frame, textvariable=self._ffmpeg_opus_bitrate_var,
+            width=8, bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+            insertbackground=THEME.text, relief="flat",
+        ).pack(side="left")
+
+        # ── qaac sub-panel ──
+        self._qaac_enc_frame = tk.Frame(card, bg=THEME.card)
+
+        # qaac mode selector
+        qa_row1 = tk.Frame(self._qaac_enc_frame, bg=THEME.card)
+        qa_row1.pack(fill="x", padx=14, pady=(0, 4))
+
+        self._qaac_mode_lbl = tk.Label(
+            qa_row1, text=t("encoding_mode"), font=FONTS.small,
+            fg=THEME.text, bg=THEME.card,
+        )
+        self._qaac_mode_lbl.pack(side="left", padx=(0, 8))
+
+        qaac_modes = [
+            (QaacMode.TVBR.flag, t("qaac_tvbr_label")),
+            (QaacMode.CVBR.flag, t("qaac_cvbr_label")),
+            (QaacMode.ABR.flag, t("qaac_abr_label")),
+            (QaacMode.CBR.flag, t("qaac_cbr_label")),
+        ]
+
+        self._qaac_mode_menu = tk.OptionMenu(
+            qa_row1, self._qaac_mode_var,
+            *[v for v, _ in qaac_modes],
+            command=self._on_qaac_mode_change,
+        )
+        self._qaac_mode_menu.config(
+            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+            highlightthickness=0, relief="flat",
+        )
+        self._qaac_mode_menu["menu"].config(
+            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+        )
+        self._qaac_mode_menu.pack(side="left", fill="x", expand=True)
+
+        # qaac TVBR quality
+        self._qaac_tvbr_frame = tk.Frame(self._qaac_enc_frame, bg=THEME.card)
+        self._qaac_tvbr_frame.pack(fill="x", padx=14, pady=(0, 4))
+        self._qaac_tvbr_quality_lbl = tk.Label(
+            self._qaac_tvbr_frame, text=t("qaac_quality_label"), font=FONTS.small,
+            fg=THEME.text, bg=THEME.card,
+        )
+        self._qaac_tvbr_quality_lbl.pack(side="left", padx=(0, 8))
+        tk.Entry(
+            self._qaac_tvbr_frame, textvariable=self._qaac_tvbr_quality_var,
+            width=8, bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+            insertbackground=THEME.text, relief="flat",
+        ).pack(side="left")
+
+        # qaac CVBR bitrate
+        self._qaac_cvbr_frame = tk.Frame(self._qaac_enc_frame, bg=THEME.card)
+        self._qaac_cvbr_bitrate_lbl = tk.Label(
+            self._qaac_cvbr_frame, text=t("encoding_bitrate"), font=FONTS.small,
+            fg=THEME.text, bg=THEME.card,
+        )
+        self._qaac_cvbr_bitrate_lbl.pack(side="left", padx=(0, 8))
+        tk.Entry(
+            self._qaac_cvbr_frame, textvariable=self._qaac_cvbr_bitrate_var,
+            width=8, bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+            insertbackground=THEME.text, relief="flat",
+        ).pack(side="left")
+
+        # qaac ABR bitrate
+        self._qaac_abr_frame = tk.Frame(self._qaac_enc_frame, bg=THEME.card)
+        self._qaac_abr_bitrate_lbl = tk.Label(
+            self._qaac_abr_frame, text=t("encoding_bitrate"), font=FONTS.small,
+            fg=THEME.text, bg=THEME.card,
+        )
+        self._qaac_abr_bitrate_lbl.pack(side="left", padx=(0, 8))
+        tk.Entry(
+            self._qaac_abr_frame, textvariable=self._qaac_abr_bitrate_var,
+            width=8, bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+            insertbackground=THEME.text, relief="flat",
+        ).pack(side="left")
+
+        # qaac CBR bitrate
+        self._qaac_cbr_frame = tk.Frame(self._qaac_enc_frame, bg=THEME.card)
+        self._qaac_cbr_bitrate_lbl = tk.Label(
+            self._qaac_cbr_frame, text=t("encoding_bitrate"), font=FONTS.small,
+            fg=THEME.text, bg=THEME.card,
+        )
+        self._qaac_cbr_bitrate_lbl.pack(side="left", padx=(0, 8))
+        tk.Entry(
+            self._qaac_cbr_frame, textvariable=self._qaac_cbr_bitrate_var,
+            width=8, bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+            insertbackground=THEME.text, relief="flat",
+        ).pack(side="left")
+
+        # qaac checkboxes
+        qa_checks = tk.Frame(self._qaac_enc_frame, bg=THEME.card)
+        qa_checks.pack(fill="x", padx=14, pady=(0, 8))
+
+        self._qaac_he_aac_cb = tk.Checkbutton(
+            qa_checks, text=t("encoding_he_aac"), variable=self._qaac_he_aac_var,
+            bg=THEME.card, fg=THEME.text, selectcolor=THEME.input_bg,
+            activebackground=THEME.card, activeforeground=THEME.text,
+            font=FONTS.small,
+        )
+        self._qaac_he_aac_cb.pack(side="left", padx=(0, 12))
+
+        self._qaac_no_delay_cb = tk.Checkbutton(
+            qa_checks, text=t("encoding_no_delay"), variable=self._qaac_no_delay_var,
+            bg=THEME.card, fg=THEME.text, selectcolor=THEME.input_bg,
+            activebackground=THEME.card, activeforeground=THEME.text,
+            font=FONTS.small,
+        )
+        self._qaac_no_delay_cb.pack(side="left")
+
+        # ── Dolby sub-panel ──
+        self._dolby_enc_frame = tk.Frame(card, bg=THEME.card)
+        self._build_deew_panel(self._dolby_enc_frame)
+
+        # Bottom padding
+        tk.Frame(card, bg=THEME.card, height=6).pack(fill="x")
+
+        # Store card reference for refresh
+        self._encoding_card = card
+
+        # Initialize visibility
+        self._on_encoding_pipeline_change(self._encoding_pipeline_var.get())
+
+    def _on_encoding_pipeline_change(self, value: str) -> None:
+        """Show/hide encoding sub-panels based on pipeline selection."""
+        # Hide all sub-panels
+        self._ffmpeg_enc_frame.pack_forget()
+        self._qaac_enc_frame.pack_forget()
+        self._dolby_enc_frame.pack_forget()
+
+        if value == EncodingPipeline.FFMPEG.value:
+            self._ffmpeg_enc_frame.pack(fill="x", pady=(0, 4))
+            self._on_ffmpeg_format_change(self._ffmpeg_format_var.get())
+        elif value == EncodingPipeline.QAAC.value:
+            self._qaac_enc_frame.pack(fill="x", pady=(0, 4))
+            self._on_qaac_mode_change(self._qaac_mode_var.get())
+        elif value == EncodingPipeline.DOLBY.value:
+            self._dolby_enc_frame.pack(fill="x", pady=(0, 4))
+
+        self.after(50, self._fit_to_content)
+
+    def _on_ffmpeg_format_change(self, value: str) -> None:
+        """Show/hide FFmpeg format-specific fields."""
+        self._ffmpeg_aac_frame.pack_forget()
+        self._ffmpeg_flac_frame.pack_forget()
+        self._ffmpeg_flac_bd_frame.pack_forget()
+        self._ffmpeg_opus_frame.pack_forget()
+
+        if value == FFmpegOutputFormat.AAC.codec:
+            self._ffmpeg_aac_frame.pack(fill="x", padx=14, pady=(0, 4))
+        elif value == FFmpegOutputFormat.FLAC.codec:
+            self._ffmpeg_flac_frame.pack(fill="x", padx=14, pady=(0, 4))
+            self._ffmpeg_flac_bd_frame.pack(fill="x", padx=14, pady=(0, 4))
+        elif value == FFmpegOutputFormat.OPUS.codec:
+            self._ffmpeg_opus_frame.pack(fill="x", padx=14, pady=(0, 4))
+
+        self.after(50, self._fit_to_content)
+
+    def _on_qaac_mode_change(self, value: str) -> None:
+        """Show/hide qaac mode-specific fields."""
+        self._qaac_tvbr_frame.pack_forget()
+        self._qaac_cvbr_frame.pack_forget()
+        self._qaac_abr_frame.pack_forget()
+        self._qaac_cbr_frame.pack_forget()
+
+        if value == QaacMode.TVBR.flag:
+            self._qaac_tvbr_frame.pack(fill="x", padx=14, pady=(0, 4))
+        elif value == QaacMode.CVBR.flag:
+            self._qaac_cvbr_frame.pack(fill="x", padx=14, pady=(0, 4))
+        elif value == QaacMode.ABR.flag:
+            self._qaac_abr_frame.pack(fill="x", padx=14, pady=(0, 4))
+        elif value == QaacMode.CBR.flag:
+            self._qaac_cbr_frame.pack(fill="x", padx=14, pady=(0, 4))
+
+        self.after(50, self._fit_to_content)
 
     def _build_info_panel(self) -> None:
         """Bilgi panelini oluşturur."""
@@ -785,6 +1114,23 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             0, 0, 0, 4, fill=THEME.accent, outline="",
         )
 
+        # Analiz butonu
+        self.analyze_btn = tk.Button(
+            self._bottom_bar,
+            text=t("analyze_only"),
+            font=FONTS.button,
+            fg=THEME.bg,
+            bg=THEME.accent2,
+            activebackground=THEME.accent2,
+            activeforeground=THEME.bg,
+            relief="flat",
+            padx=0,
+            pady=12,
+            cursor="hand2",
+            command=self._start_analyze,
+        )
+        self.analyze_btn.pack(fill="x", padx=30, pady=(0, 6))
+
         # Çalıştır butonu
         self.run_btn = tk.Button(
             self._bottom_bar,
@@ -803,6 +1149,137 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self.run_btn.pack(fill="x", padx=30, pady=(0, 12))
 
     # ── Dil Değişikliği ──────────────────────────────────────────────────
+
+    def _open_tool_paths_dialog(self) -> None:
+        """Open the tool paths configuration dialog."""
+        dialog = tk.Toplevel(self)
+        dialog.title(t("tool_paths_title"))
+        dialog.geometry("600x400")
+        dialog.resizable(False, False)
+        dialog.configure(bg=THEME.bg)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # Description
+        tk.Label(
+            dialog, text=t("tool_paths_description"),
+            font=FONTS.small, fg=THEME.muted, bg=THEME.bg,
+            wraplength=560, justify="left",
+        ).pack(fill="x", padx=20, pady=(16, 12))
+
+        # Tool path rows
+        tools = [
+            ("ffmpeg", t("tool_path_ffmpeg")),
+            ("ffprobe", t("tool_path_ffprobe")),
+            ("qaac", t("tool_path_qaac")),
+            ("deew", t("tool_path_dee")),
+        ]
+
+        path_vars: dict[str, tk.StringVar] = {}
+        status_labels: dict[str, tk.Label] = {}
+
+        for tool_name, label_text in tools:
+            frame = tk.Frame(dialog, bg=THEME.bg)
+            frame.pack(fill="x", padx=20, pady=(0, 8))
+
+            tk.Label(
+                frame, text=label_text, font=FONTS.small,
+                fg=THEME.text, bg=THEME.bg, width=14, anchor="w",
+            ).pack(side="left")
+
+            current_path = getattr(TOOL_PATHS, tool_name, None) or ""
+            var = tk.StringVar(value=current_path)
+            path_vars[tool_name] = var
+
+            entry = tk.Entry(
+                frame, textvariable=var, font=FONTS.small,
+                bg=THEME.input_bg, fg=THEME.text,
+                insertbackground=THEME.text, relief="flat",
+            )
+            entry.pack(side="left", fill="x", expand=True, padx=(4, 4))
+
+            def _browse(v=var, d=dialog):
+                from tkinter import filedialog as _fd
+                path = _fd.askopenfilename(parent=d, title="Select executable")
+                if path:
+                    v.set(path)
+
+            tk.Button(
+                frame, text=t("tool_path_browse"), font=FONTS.small,
+                fg=THEME.text, bg=THEME.input_bg, relief="flat",
+                command=_browse,
+            ).pack(side="left", padx=(0, 2))
+
+            def _clear(v=var):
+                v.set("")
+
+            tk.Button(
+                frame, text=t("tool_path_clear"), font=FONTS.small,
+                fg=THEME.muted, bg=THEME.input_bg, relief="flat",
+                command=_clear,
+            ).pack(side="left")
+
+            # Status label
+            status_lbl = tk.Label(
+                dialog, text="", font=FONTS.small,
+                fg=THEME.muted, bg=THEME.bg, anchor="w",
+            )
+            status_lbl.pack(fill="x", padx=34, pady=(0, 4))
+            status_labels[tool_name] = status_lbl
+
+        # Update status for each tool
+        def _update_statuses():
+            for tool_name, lbl in status_labels.items():
+                custom = path_vars[tool_name].get().strip()
+                if custom:
+                    if os.path.isfile(custom):
+                        lbl.config(text=t("tool_path_custom", path=custom), fg="#4ade80")
+                    else:
+                        lbl.config(text=t("tool_path_not_found"), fg=THEME.accent2)
+                else:
+                    try:
+                        found = resolve_tool(tool_name)
+                        lbl.config(text=t("tool_path_found", path=found), fg="#4ade80")
+                    except OSError:
+                        lbl.config(text=t("tool_path_using_path"), fg=THEME.muted)
+
+        _update_statuses()
+
+        # Save button
+        def _save():
+            paths = ToolPaths(
+                ffmpeg=path_vars["ffmpeg"].get().strip() or None,
+                ffprobe=path_vars["ffprobe"].get().strip() or None,
+                qaac=path_vars["qaac"].get().strip() or None,
+                deew=path_vars["deew"].get().strip() or None,
+            )
+            ok = save_tool_paths(paths)
+            _update_statuses()
+            self._update_deew_status()
+            if not ok:
+                messagebox.showwarning(
+                    t("tool_paths_title"),
+                    "Failed to save tool paths to disk.",
+                )
+
+        btn_frame = tk.Frame(dialog, bg=THEME.bg)
+        btn_frame.pack(fill="x", padx=20, pady=(8, 16))
+
+        tk.Button(
+            btn_frame, text=t("tool_paths_saved").replace(".", ""),
+            font=FONTS.button, fg=THEME.bg, bg=THEME.accent,
+            activebackground=THEME.accent, activeforeground=THEME.bg,
+            relief="flat", padx=20, pady=8, cursor="hand2",
+            command=_save,
+        ).pack(side="right")
+
+        tk.Button(
+            btn_frame, text=t("cancel"),
+            font=FONTS.button, fg=THEME.text, bg=THEME.card,
+            activebackground=THEME.card, activeforeground=THEME.text,
+            relief="flat", padx=20, pady=8, cursor="hand2",
+            command=dialog.destroy,
+        ).pack(side="right", padx=(0, 8))
 
     def _on_language_change(self, selected: str) -> None:
         """Dil değiştiğinde tüm UI metinlerini günceller."""
@@ -839,8 +1316,6 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._update_fps_ratio_label()
 
         # Dolby
-        self._dolby_title_lbl.config(text=t("dolby_encoding"))
-        self._dolby_enable_cb.config(text=t("dolby_enable"))
         self._enc_label.config(text=t("encoder_label"))
         self._fmt_label.config(text=t("format_label"))
         self._ch_label.config(text=t("channel_layout"))
@@ -851,6 +1326,25 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._update_deew_status()
         self._update_encoder_ui()
 
+        # Encoding panel
+        self._encoding_title_lbl.config(text=t("encoding_pipeline"))
+        self._encoding_pipeline_lbl.config(text=t("encoding_pipeline_label"))
+        self._ffmpeg_format_lbl.config(text=t("encoding_format"))
+        self._ffmpeg_aac_bitrate_lbl.config(text=t("aac_bitrate_label"))
+        self._ffmpeg_flac_compression_lbl.config(text=t("ffmpeg_flac_compression_label"))
+        self._ffmpeg_opus_bitrate_lbl.config(text=t("opus_bitrate_label"))
+        self._qaac_mode_lbl.config(text=t("encoding_mode"))
+        self._qaac_tvbr_quality_lbl.config(text=t("qaac_quality_label"))
+        self._qaac_cvbr_bitrate_lbl.config(text=t("encoding_bitrate"))
+        self._qaac_abr_bitrate_lbl.config(text=t("encoding_bitrate"))
+        self._qaac_cbr_bitrate_lbl.config(text=t("encoding_bitrate"))
+        self._qaac_he_aac_cb.config(text=t("encoding_he_aac"))
+        self._qaac_no_delay_cb.config(text=t("encoding_no_delay"))
+        self._ffmpeg_flac_bd_lbl.config(text=t("flac_bit_depth_label"))
+
+        # Tool paths button
+        self._tool_paths_btn.config(text=t("tool_paths_button"))
+
         # Bilgi paneli
         for lbl, key in self._info_labels:
             lbl.config(text=t(key))
@@ -858,8 +1352,9 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         # Log
         self._log_title_lbl.config(text=t("log_label"))
 
-        # Buton
+        # Butonlar
         if not self._processing:
+            self.analyze_btn.config(text=t("analyze_only"))
             self.run_btn.config(text=t("start_sync"))
 
         # Drop zones
@@ -942,10 +1437,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             self._deew_status_lbl.config(text=t("dee_not_installed"), fg=THEME.accent2)
 
     def _on_deew_toggle(self) -> None:
-        if self.deew_enabled_var.get():
-            self._show_deew_settings(True)
-        else:
-            self._show_deew_settings(False)
+        """Legacy no-op — Dolby visibility is now controlled by the pipeline dropdown."""
+        pass
 
     def _on_encoder_type_change(self, *_args: object) -> None:
         self._update_encoder_ui()
@@ -974,11 +1467,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self.after(50, self._fit_to_content)
 
     def _show_deew_settings(self, show: bool) -> None:
-        if show:
-            self._deew_settings_frame.pack(fill="x", padx=14, pady=(0, 10))
-        else:
-            self._deew_settings_frame.pack_forget()
-        self.after(50, self._fit_to_content)
+        """Legacy no-op — Dolby settings are always visible when the sub-panel is shown."""
+        pass
 
     def _on_deew_format_change(self, *_args: object) -> None:
         self._update_channel_options()
@@ -1244,6 +1734,174 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
 
     # ── İş Mantığı Koordinasyonu ─────────────────────────────────────────
 
+    def _clear_log(self) -> None:
+        """Log metin kutusunu temizler."""
+        def _do() -> None:
+            self.log_box.config(state="normal")
+            self.log_box.delete("1.0", "end")
+            self.log_box.config(state="disabled")
+        self.after(0, _do)
+
+    def _start_analyze(self) -> None:
+        """Start analysis-only mode — no file modifications."""
+        src = self._src_path
+        sync = self._sync_path
+
+        if not src or not sync:
+            messagebox.showwarning("Audio Sync", t("analyze_no_files"))
+            return
+
+        if not os.path.isfile(src) or not os.path.isfile(sync):
+            messagebox.showwarning("Audio Sync", t("analyze_no_files"))
+            return
+
+        try:
+            FFmpegWrapper.check_availability()
+        except OSError as e:
+            messagebox.showerror("FFmpeg", str(e))
+            return
+
+        with self._processing_lock:
+            if self._processing:
+                return
+            self._processing = True
+
+        self.analyze_btn.config(state="disabled", text=t("analyzing"))
+        self.run_btn.config(state="disabled")
+        self._clear_log()
+        self._set_progress(0)
+
+        threading.Thread(target=self._analyze_only, daemon=True).start()
+
+    def _analyze_only(self) -> None:
+        """Background thread: passive analysis only, no file modifications."""
+        src = self._src_path
+        sync = self._sync_path
+        tmp_dir = _tempfile_mod.mkdtemp(prefix="audio_sync_analyze_")
+
+        try:
+            self._log(t("analyze_started"))
+            self._set_progress(5)
+
+            # Step 1: Probe audio files
+            self._log(t("analyze_probing"))
+            src_info = self._ffmpeg.probe_audio(src)
+            sync_info = self._ffmpeg.probe_audio(sync)
+            self._set_progress(15)
+
+            # Log file info
+            self._log(t("analyze_src_info",
+                         channels=src_info.channels,
+                         bits=src_info.bits,
+                         sample_rate=src_info.sample_rate))
+            self._log(t("analyze_sync_info",
+                         channels=sync_info.channels,
+                         bits=sync_info.bits,
+                         sample_rate=sync_info.sample_rate))
+
+            # Update info panel on main thread
+            output_sr = OutputSampleRate.decide(
+                src_info.sample_rate, sync_info.sample_rate, False,
+            )
+            self.after(0, lambda: self._update_info_panel(sync_info, output_sr))
+
+            # Step 2: Convert to mono WAV for analysis
+            self._log(t("analyze_converting"))
+            self._set_progress(25)
+
+            src_wav = os.path.join(tmp_dir, "src_mono.wav")
+            sync_wav = os.path.join(tmp_dir, "sync_mono.wav")
+            self._ffmpeg.to_wav_mono(src, src_wav)
+            self._set_progress(40)
+            self._ffmpeg.to_wav_mono(sync, sync_wav)
+            self._set_progress(55)
+
+            # Step 3: Calculate delay
+            self._log(t("analyze_calculating"))
+
+            skip_sec = parse_float(
+                self.skip_intro_var.get(), default=120.0, minimum=0.0, maximum=3600.0,
+            )
+            segment_count = parse_int(
+                self.segment_count_var.get(), default=12, minimum=4, maximum=40,
+            )
+
+            result = self._analyzer.calculate_delay(
+                src_wav, sync_wav,
+                skip_intro_sec=skip_sec,
+                total_segments=segment_count,
+            )
+            self._set_progress(85)
+
+            # Step 4: Display comprehensive results
+            self._log("")
+            self._log(t("analyze_result_header"))
+            self._log("")
+
+            # Sync point time (convert delay_ms to timestamp format)
+            abs_ms = abs(result.delay_ms)
+            hours = int(abs_ms // 3600000)
+            minutes = int((abs_ms % 3600000) // 60000)
+            seconds = int((abs_ms % 60000) // 1000)
+            millis = int(abs_ms % 1000)
+            time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
+            self._log(t("sync_point_time", time=time_str))
+
+            # Delay amount with description
+            description = AudioAnalyzer.describe_offset(result.delay_ms)
+            self._log(t("delay_amount", delay_ms=result.delay_ms, description=description))
+
+            # Confidence score with level
+            if result.confidence >= 8.0:
+                conf_level = t("confidence_high")
+            elif result.confidence >= 4.0:
+                conf_level = t("confidence_medium")
+            else:
+                conf_level = t("confidence_low")
+            self._log(t("confidence_score", confidence=result.confidence) + f" ({conf_level})")
+
+            # Drift amount
+            if result.drift_ms_per_min is not None:
+                self._log(t("drift_amount", drift=result.drift_ms_per_min))
+            else:
+                self._log(t("drift_none"))
+
+            # Coarse delay
+            self._log(t("coarse_delay", coarse_ms=result.coarse_ms))
+
+            # Segments used
+            self._log(t("segments_used", used=result.used_segments, total=result.total_segments))
+
+            self._log("")
+            self._log(t("analyze_result_header"))
+            self._log("")
+
+            # Also use existing display method for info panel update
+            self.after(0, lambda: self._display_analysis_result(result))
+
+            self._set_progress(100)
+            self._log(t("analyze_complete"))
+
+        except Exception as e:
+            self._log(f"❌ Error: {e}")
+            import traceback
+            self._log(traceback.format_exc())
+        finally:
+            # Clean up temp files
+            try:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+            # Re-enable buttons on main thread
+            def _restore() -> None:
+                with self._processing_lock:
+                    self._processing = False
+                self.analyze_btn.config(state="normal", text=t("analyze_only"))
+                self.run_btn.config(state="normal", text=t("start_sync"))
+
+            self.after(0, _restore)
+
     def _start(self) -> None:
         """Senkronizasyon işlemini başlatır."""
         with self._processing_lock:
@@ -1263,7 +1921,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             self._reset_processing()
             return
 
-        deew_enabled = self.deew_enabled_var.get()
+        deew_enabled = (self._encoding_pipeline_var.get() == EncodingPipeline.DOLBY.value)
         encoder = self._get_selected_encoder()
 
         if deew_enabled and encoder == EncoderType.DEE:
@@ -1271,6 +1929,16 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                 DeewEncoder.check_availability()
             except OSError as e:
                 messagebox.showerror(t("deew_not_found_title"), str(e))
+                self._reset_processing()
+                return
+
+        # Encoding pipeline availability checks
+        pipeline = self._encoding_pipeline_var.get()
+
+        if pipeline == EncodingPipeline.QAAC.value:
+            ok, msg = QaacEncoder.check_availability()
+            if not ok:
+                messagebox.showerror("qaac", msg)
                 self._reset_processing()
                 return
 
@@ -1282,11 +1950,61 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             self._reset_processing()
             return
 
+        # ── Capture encoding params on main thread (thread-safe) ──
+        encoding_params: dict = {
+            "pipeline": pipeline,
+            "ffmpeg_format": self._ffmpeg_format_var.get(),
+            "ffmpeg_aac_bitrate": parse_int(
+                self._ffmpeg_aac_bitrate_var.get(), default=256, minimum=32, maximum=512,
+            ),
+            "ffmpeg_flac_compression": parse_int(
+                self._ffmpeg_flac_compression_var.get(), default=5, minimum=0, maximum=12,
+            ),
+            "ffmpeg_flac_bit_depth": parse_int(
+                self._ffmpeg_flac_bit_depth_var.get(), default=24, minimum=16, maximum=24,
+            ),
+            "ffmpeg_opus_bitrate": parse_int(
+                self._ffmpeg_opus_bitrate_var.get(), default=128, minimum=6, maximum=512,
+            ),
+            "qaac_mode": self._qaac_mode_var.get(),
+            "qaac_tvbr_quality": parse_int(
+                self._qaac_tvbr_quality_var.get(), default=91, minimum=0, maximum=127,
+            ),
+            "qaac_cvbr_bitrate": parse_int(
+                self._qaac_cvbr_bitrate_var.get(), default=256, minimum=32, maximum=512,
+            ),
+            "qaac_abr_bitrate": parse_int(
+                self._qaac_abr_bitrate_var.get(), default=256, minimum=32, maximum=512,
+            ),
+            "qaac_cbr_bitrate": parse_int(
+                self._qaac_cbr_bitrate_var.get(), default=256, minimum=32, maximum=512,
+            ),
+            "qaac_he_aac": self._qaac_he_aac_var.get(),
+            "qaac_no_delay": self._qaac_no_delay_var.get(),
+        }
+
         if deew_enabled:
             fmt = self._get_selected_format()
             ext = fmt.extension
             ext_label = fmt.display_name
-            filetypes = [(ext_label, f"*{ext}")]
+            filetypes = [(ext_label, f"*{ext}"), ("WAV", "*.wav")]
+        elif pipeline == EncodingPipeline.FFMPEG.value:
+            fmt_codec = self._ffmpeg_format_var.get()
+            if fmt_codec == FFmpegOutputFormat.AAC.codec:
+                ext = ".m4a"
+                filetypes = [("AAC/M4A", "*.m4a"), ("WAV", "*.wav")]
+            elif fmt_codec == FFmpegOutputFormat.FLAC.codec:
+                ext = ".flac"
+                filetypes = [("FLAC", "*.flac"), ("WAV", "*.wav")]
+            elif fmt_codec == FFmpegOutputFormat.OPUS.codec:
+                ext = ".opus"
+                filetypes = [("Opus", "*.opus"), ("WAV", "*.wav")]
+            else:
+                ext = ".wav"
+                filetypes = [("WAV", "*.wav")]
+        elif pipeline == EncodingPipeline.QAAC.value:
+            ext = ".m4a"
+            filetypes = [("AAC/M4A", "*.m4a"), ("WAV", "*.wav")]
         else:
             ext = ".wav"
             filetypes = [("WAV", "*.wav")]
@@ -1327,13 +2045,14 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         src_path = self._src_path
         sync_path = self._sync_path
 
+        self.analyze_btn.config(state="disabled")
         self.run_btn.config(state="disabled", text=t("processing"))
         self._set_progress(0)
 
         threading.Thread(
             target=self._process,
             args=(src_path, sync_path, out_path, skip_sec, segment_count, force_48k,
-                  fps_conversion, deew_params, sync_mode),
+                  fps_conversion, deew_params, sync_mode, encoding_params),
             daemon=True,
         ).start()
 
@@ -1354,10 +2073,12 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         fps_conversion: FpsConversion | None = None,
         deew_params: dict | None = None,
         sync_mode: SyncMode = SyncMode.ADELAY_AMIX,
+        encoding_params: dict | None = None,
     ) -> None:
         """Arka plan thread'inde senkronizasyon işlemini yürütür."""
         fps_tmp_path: str | None = None
         wav_out_path: str | None = None  # Dolby encoding ara WAV dosyası
+        needs_encoding: bool = False
 
         try:
             # 1. Ses bilgilerini oku
@@ -1414,13 +2135,26 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             self._display_analysis_result(result)
 
             # 5. FFmpeg ile senkronizasyon uygula
-            if deew_params is not None:
+            # Determine if we need a temp WAV (any encoding pipeline selected)
+            enc = encoding_params or {}
+            pipeline = enc.get("pipeline", EncodingPipeline.NONE.value)
+            needs_encoding = (
+                deew_params is not None
+                or pipeline in (
+                    EncodingPipeline.FFMPEG.value,
+                    EncodingPipeline.QAAC.value,
+                )
+            )
+
+            if needs_encoding:
+                # Sync to temp WAV, then encode to final output
                 _fd, wav_out_path = _tempfile_mod.mkstemp(
                     suffix=".wav", prefix="audiosync_",
                     dir=os.path.dirname(out_path) or ".",
                 )
                 os.close(_fd)
             else:
+                # No encoding — sync directly to user's chosen path
                 wav_out_path = out_path
 
             self._log(t("log_applying_sync"))
@@ -1524,6 +2258,47 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                                 f"Deew encoding failed and WAV file not found: {deew_err}"
                             ) from deew_err
 
+            # 6b. Encoding pipeline (FFmpeg/qaac/Native — when not using Dolby)
+            if deew_params is None:
+                if pipeline == EncodingPipeline.FFMPEG.value:
+                    self._log(t("encoding_started"))
+                    fmt_codec = enc.get("ffmpeg_format", FFmpegOutputFormat.AAC.codec)
+
+                    if fmt_codec == FFmpegOutputFormat.AAC.codec:
+                        bitrate = enc.get("ffmpeg_aac_bitrate", 256)
+                        summary = self._ffmpeg.encode_to_aac(wav_out_path, out_path, bitrate=bitrate)
+                    elif fmt_codec == FFmpegOutputFormat.FLAC.codec:
+                        compression = enc.get("ffmpeg_flac_compression", 5)
+                        bit_depth = enc.get("ffmpeg_flac_bit_depth", 24)
+                        summary = self._ffmpeg.encode_to_flac(wav_out_path, out_path, compression=compression, bit_depth=bit_depth)
+                    elif fmt_codec == FFmpegOutputFormat.OPUS.codec:
+                        bitrate = enc.get("ffmpeg_opus_bitrate", 128)
+                        summary = self._ffmpeg.encode_to_opus(wav_out_path, out_path, bitrate=bitrate)
+                    else:
+                        summary = ""
+
+                    self._log(t("encoding_complete", summary=summary))
+                    self._set_progress(95)
+
+                elif pipeline == EncodingPipeline.QAAC.value:
+                    self._log(t("encoding_started"))
+                    mode_flag = enc.get("qaac_mode", QaacMode.TVBR.flag)
+                    mode = next((m for m in QaacMode if m.flag == mode_flag), QaacMode.TVBR)
+
+                    config = QaacConfig(
+                        mode=mode,
+                        tvbr_quality=enc.get("qaac_tvbr_quality", 91),
+                        cvbr_bitrate=enc.get("qaac_cvbr_bitrate", 256),
+                        abr_bitrate=enc.get("qaac_abr_bitrate", 256),
+                        cbr_bitrate=enc.get("qaac_cbr_bitrate", 256),
+                        he_aac=enc.get("qaac_he_aac", False),
+                        no_delay=enc.get("qaac_no_delay", True),
+                    )
+
+                    summary = QaacEncoder.encode(wav_out_path, out_path, config)
+                    self._log(t("encoding_complete", summary=summary))
+                    self._set_progress(95)
+
             # 7. Tamamlandı
             self._set_progress(100)
             self._log(t("log_completed", name=os.path.basename(out_path)))
@@ -1534,6 +2309,12 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         except Exception as e:
             self._log(t("log_error", err=e))
             self.after(0, lambda err=str(e): messagebox.showerror(t("error_title"), err))
+            # Clean up partial/corrupt output file on encoding failure
+            if needs_encoding and os.path.isfile(out_path):
+                try:
+                    os.remove(out_path)
+                except OSError:
+                    pass
         finally:
             # Geçici dosyaları temizle
             for tmp_path in (fps_tmp_path, wav_out_path):
@@ -1544,9 +2325,12 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                         pass
             with self._processing_lock:
                 self._processing = False
-            self.after(0, lambda: self.run_btn.config(
-                state="normal", text=t("start_sync"),
-            ))
+
+            def _restore_buttons() -> None:
+                self.analyze_btn.config(state="normal", text=t("analyze_only"))
+                self.run_btn.config(state="normal", text=t("start_sync"))
+
+            self.after(0, _restore_buttons)
 
     def _reset_processing(self) -> None:
         with self._processing_lock:
@@ -1626,20 +2410,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self.after(0, _draw)
 
     def _fit_to_content(self) -> None:
-        """Pencere boyutunu içeriğe göre ayarlar ve kaydırma bölgesini günceller.
-
-        İçerik ekran yüksekliğini aşarsa pencere maksimum boyutta kalır
-        ve kaydırma çubuğu otomatik olarak görünür hale gelir.
-        Alt çubuk (ilerleme + buton) her zaman görünür kalır.
-        """
+        """Update scroll region without changing window size."""
         self.update_idletasks()
-        content_h = self._content.winfo_reqheight() + 20
-        bottom_h = self._bottom_bar.winfo_reqheight()
-        max_h = self.winfo_screenheight() - 80
-        current_w = self.winfo_width()
-        target_w = max(600, current_w)
-        target_h = min(max(500, content_h + bottom_h), max_h)
-        self.geometry(f"{target_w}x{target_h}")
-        # Kaydırma bölgesini güncelle — panel açılıp kapandığında gerekli
-        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
-        self._update_scrollbar_visibility()
+        if hasattr(self, '_canvas'):
+            self._canvas.configure(scrollregion=self._canvas.bbox("all"))

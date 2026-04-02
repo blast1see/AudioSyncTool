@@ -26,6 +26,7 @@ from audio_sync.config import (
     DEEW_CONFIG,
     get_deew_bitrate_key,
     DEEW_DEFAULT_BITRATES,
+    resolve_tool,
 )
 
 
@@ -36,13 +37,20 @@ def _find_deew_executable() -> str | None:
     """Deew çalıştırılabilir dosyasını bulur.
 
     Arama sırası:
-        1. Proje ``tools/`` dizinindeki ``deew.exe``
-        2. Sistem PATH'indeki ``deew``
+        1. ``resolve_tool("deew")`` — kullanıcı tanımlı yol veya sistem PATH'inde ``deew``
+        2. Proje ``tools/`` dizinindeki ``deew.exe``
+        3. Sistem PATH'indeki ``deew``
 
     Returns:
         Deew çalıştırılabilir dosyasının tam yolu veya ``None``.
     """
-    # 1. Proje tools/ dizini
+    # 1. resolve_tool ile kullanıcı tanımlı yol veya "deew" adıyla PATH araması
+    try:
+        return resolve_tool("deew")
+    except OSError:
+        pass
+
+    # 2. Proje tools/ dizini
     project_root = Path(__file__).resolve().parent.parent.parent
     local_deew = project_root / "tools" / "deew.exe"
     if local_deew.is_file():
@@ -53,7 +61,7 @@ def _find_deew_executable() -> str | None:
     if local_deew_no_ext.is_file():
         return str(local_deew_no_ext)
 
-    # 2. Sistem PATH
+    # 3. Sistem PATH
     system_deew = shutil.which("deew")
     if system_deew:
         return system_deew
