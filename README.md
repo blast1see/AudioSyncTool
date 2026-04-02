@@ -29,7 +29,7 @@
 
 ### Screenshots
 
-![Audio Sync Tool - English UI](https://github.com/user-attachments/assets/a1c300d1-c5e5-44ff-b86f-73d17aa0bd23)
+<img width="802" height="1392" alt="2026-04-02 19_26_56-Audio Sync Tool" src="https://github.com/user-attachments/assets/89009109-7947-4d85-b0f7-8fa21c4a64f7" />
 
 ### Key Features
 
@@ -251,7 +251,7 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed list of changes in each version.
 
 ### Ekran Goruntusu
 
-![Audio Sync Tool - Turkce Arayuz](https://github.com/user-attachments/assets/c2551a54-b1ae-4bb1-a7b4-7e632b21362d)
+<img width="802" height="1392" alt="2026-04-02 19_27_06-Audio Sync Tool-TR" src="https://github.com/user-attachments/assets/106d8021-baec-4f75-9e2a-2f46f347c6be" />
 
 ### Temel Ozellikler
 
