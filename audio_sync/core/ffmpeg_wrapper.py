@@ -15,7 +15,7 @@ import sys
 import warnings
 from typing import Protocol
 
-from audio_sync.config import DeewFormat, FpsConversion, PcmCodec, SyncConfig, SyncMode, SYNC_CONFIG
+from audio_sync.config import DeewFormat, FpsConversion, PcmCodec, SyncConfig, SyncMode, SYNC_CONFIG, resolve_tool
 from audio_sync.core.models import AudioInfo, OutputSampleRate
 
 
@@ -94,7 +94,9 @@ class FFmpegWrapper:
             OSError: Araçlardan biri bulunamazsa.
         """
         for tool in ("ffmpeg", "ffprobe"):
-            if shutil.which(tool) is None:
+            try:
+                resolve_tool(tool)
+            except OSError:
                 raise OSError(
                     f"'{tool}' not found. Please install FFmpeg:\n"
                     f"  https://ffmpeg.org/download.html\n"
@@ -116,7 +118,7 @@ class FFmpegWrapper:
             döndürülür ve uyarı bilgisi ``warnings`` listesine eklenir.
         """
         cmd = [
-            "ffprobe",
+            resolve_tool("ffprobe"),
             "-v", "error",
             "-select_streams", "a:0",
             "-show_entries",
@@ -165,7 +167,7 @@ class FFmpegWrapper:
         import json as _json
 
         cmd = [
-            "ffprobe",
+            resolve_tool("ffprobe"),
             "-v", "error",
             "-select_streams", "a",
             "-show_entries",
@@ -215,7 +217,7 @@ class FFmpegWrapper:
             RuntimeError: If extraction fails.
         """
         cmd = [
-            "ffmpeg",
+            resolve_tool("ffmpeg"),
             "-y",
             "-i", input_path,
             "-map", f"0:{stream_index}",
@@ -240,7 +242,7 @@ class FFmpegWrapper:
             RuntimeError: FFmpeg dönüşüm hatası.
         """
         cmd = [
-            "ffmpeg", "-y",
+            resolve_tool("ffmpeg"), "-y",
             "-i", src,
             "-ar", str(self._config.analysis_sample_rate),
             "-ac", "1",
@@ -296,7 +298,7 @@ class FFmpegWrapper:
         sample_rate = audio_info.sample_rate
 
         cmd = [
-            "ffmpeg", "-y",
+            resolve_tool("ffmpeg"), "-y",
             "-i", src,
             "-af", f"atempo={atempo_value:.15f}",
             "-ac", str(channels),
@@ -399,24 +401,24 @@ class FFmpegWrapper:
         self, src: str, sync: str, delay_ms: float, abs_ms: float,
         channels: int, pcm_codec: str, output_sr: OutputSampleRate, out_path: str,
     ) -> tuple[list[str], str]:
-        """adelay + amix modu — varsayılan ve en güvenilir yöntem."""
+        """adelay modu — yalnızca sync (hedef) ses çıktıya yazılır.
+
+        src (referans) ses yalnızca gecikme hesabında kullanılır,
+        çıktıya dahil edilmez.
+        """
         delay_str = "|".join([f"{abs_ms:.3f}"] * channels)
 
         if delay_ms >= 0:
-            flt = (
-                f"[0:a]adelay={delay_str}[delayed_src];"
-                f"[delayed_src][1:a]amix=inputs=2:duration=longest:dropout_transition=0[out]"
-            )
+            # Sync ses erkende → başına gecikme (sessizlik) ekle
+            flt = f"[0:a]adelay={delay_str}:all=1[out]"
         else:
-            flt = (
-                f"[1:a]adelay={delay_str}[delayed_sync];"
-                f"[0:a][delayed_sync]amix=inputs=2:duration=longest:dropout_transition=0[out]"
-            )
+            # Sync ses geçte → başından kırp
+            trim_sec = abs_ms / 1000.0
+            flt = f"[0:a]atrim=start={trim_sec:.6f},asetpts=PTS-STARTPTS[out]"
 
         cmd = [
-            "ffmpeg", "-y",
-            "-i", src,
-            "-i", sync,
+            resolve_tool("ffmpeg"), "-y",
+            "-i", sync,  # Yalnızca sync/hedef dosya
             "-filter_complex", flt,
             "-map", "[out]",
         ]
@@ -432,35 +434,31 @@ class FFmpegWrapper:
         ])
 
         resample_part = f"-ar {output_sr.rate} " if output_sr.needs_resample else ""
-        summary = f"[adelay+amix] ffmpeg … {resample_part}-ac {channels} -acodec {pcm_codec} -rf64 auto"
+        summary = f"[adelay] ffmpeg … {resample_part}-ac {channels} -acodec {pcm_codec} -rf64 auto"
         return cmd, summary
 
     def _build_sync_aresample(
         self, src: str, sync: str, delay_ms: float, abs_ms: float,
         channels: int, pcm_codec: str, output_sr: OutputSampleRate, out_path: str,
     ) -> tuple[list[str], str]:
-        """aresample modu — örnekleme oranı tabanlı senkronizasyon.
+        """aresample modu — yalnızca sync (hedef) ses çıktıya yazılır.
 
-        Sync dosyasına adelay uygulayıp aresample ile yüksek kaliteli
-        resampling yapar.
+        Sync dosyasına adelay + aresample uygular.
+        src (referans) ses çıktıya dahil edilmez.
         """
         delay_str = "|".join([f"{abs_ms:.3f}"] * channels)
 
         if delay_ms >= 0:
-            flt = (
-                f"[0:a]adelay={delay_str},aresample=async=1[delayed_src];"
-                f"[delayed_src][1:a]amix=inputs=2:duration=longest:dropout_transition=0[out]"
-            )
+            # Sync ses erkende → başına gecikme ekle + aresample
+            flt = f"[0:a]adelay={delay_str}:all=1,aresample=async=1[out]"
         else:
-            flt = (
-                f"[1:a]adelay={delay_str},aresample=async=1[delayed_sync];"
-                f"[0:a][delayed_sync]amix=inputs=2:duration=longest:dropout_transition=0[out]"
-            )
+            # Sync ses geçte → başından kırp + aresample
+            trim_sec = abs_ms / 1000.0
+            flt = f"[0:a]atrim=start={trim_sec:.6f},asetpts=PTS-STARTPTS,aresample=async=1[out]"
 
         cmd = [
-            "ffmpeg", "-y",
-            "-i", src,
-            "-i", sync,
+            resolve_tool("ffmpeg"), "-y",
+            "-i", sync,  # Yalnızca sync/hedef dosya
             "-filter_complex", flt,
             "-map", "[out]",
         ]
@@ -483,60 +481,38 @@ class FFmpegWrapper:
         self, src: str, sync: str, delay_ms: float, abs_ms: float,
         channels: int, pcm_codec: str, output_sr: OutputSampleRate, out_path: str,
     ) -> tuple[list[str], str]:
-        """atempo modu — kırpma tabanlı senkronizasyon (sessizlik ekleme yerine).
+        """atempo modu — yalnızca sync (hedef) ses çıktıya yazılır.
 
-        ``adelay`` modundan farklı olarak, geç kalan akışa sessizlik eklemek
-        yerine erken başlayan akışın başından ``atrim`` ile kırpma yapar.
-        Bu sayede çıktıda sessizlik boşluğu oluşmaz.
-
-        Küçük gecikmelerde (<50 ms) ek olarak ``atempo`` filtresi ile
-        örnekleme-altı hassasiyette ince ayar yapılır.
+        Küçük gecikmelerde (<50 ms) ``atempo`` filtresi ile ince ayar,
+        büyük gecikmelerde ``adelay``/``atrim`` ile zaman düzeltmesi yapar.
+        src (referans) ses çıktıya dahil edilmez.
         """
         delay_sec = abs_ms / 1000.0
+        delay_str = "|".join([f"{abs_ms:.3f}"] * channels)
 
         # Küçük gecikmelerde atempo ile ince ayar (50 ms eşiği)
-        # atempo aralığı: 0.5–100.0; burada çok küçük sapmalar kullanıyoruz
         use_atempo_fine = abs_ms < 50.0 and abs_ms > 0.1
-        ratio: float = 1.0  # varsayılan; use_atempo_fine True ise üzerine yazılır
+        ratio: float = 1.0
 
-        if delay_ms >= 0:
-            # sync ses ileride → kaynağın başını kırp
-            if use_atempo_fine:
-                # Çok küçük gecikme: atempo ile ince ayar (kırpma yerine)
-                # Kaynak sesi çok hafif hızlandırarak senkronize et
-                # Yaklaşık 10 saniyelik pencerede delay_ms kadar telafi
-                window_sec = 10.0
-                ratio = 1.0 + (delay_sec / window_sec)
-                ratio = max(0.5, min(2.0, ratio))
-                flt = (
-                    f"[0:a]atempo={ratio:.10f}[adj_src];"
-                    f"[adj_src][1:a]amix=inputs=2:duration=longest:dropout_transition=0[out]"
-                )
-            else:
-                flt = (
-                    f"[0:a]atrim=start={delay_sec:.6f},asetpts=PTS-STARTPTS[trimmed_src];"
-                    f"[trimmed_src][1:a]amix=inputs=2:duration=shortest:dropout_transition=0[out]"
-                )
+        if abs_ms < 1.0:
+            # İhmal edilebilir gecikme — sync'i olduğu gibi kopyala
+            flt = "[0:a]acopy[out]"
+        elif use_atempo_fine:
+            # Küçük gecikme: atempo ile ince ayar
+            window_sec = 10.0
+            ratio = 1.0 + (delay_sec / window_sec)
+            ratio = max(0.5, min(2.0, ratio))
+            flt = f"[0:a]atempo={ratio:.10f}[out]"
+        elif delay_ms >= 0:
+            # Sync ses erkende → başına gecikme ekle
+            flt = f"[0:a]adelay={delay_str}:all=1[out]"
         else:
-            # sync ses geride → sync'in başını kırp
-            if use_atempo_fine:
-                window_sec = 10.0
-                ratio = 1.0 + (delay_sec / window_sec)
-                ratio = max(0.5, min(2.0, ratio))
-                flt = (
-                    f"[1:a]atempo={ratio:.10f}[adj_sync];"
-                    f"[0:a][adj_sync]amix=inputs=2:duration=longest:dropout_transition=0[out]"
-                )
-            else:
-                flt = (
-                    f"[1:a]atrim=start={delay_sec:.6f},asetpts=PTS-STARTPTS[trimmed_sync];"
-                    f"[0:a][trimmed_sync]amix=inputs=2:duration=shortest:dropout_transition=0[out]"
-                )
+            # Sync ses geçte → başından kırp
+            flt = f"[0:a]atrim=start={delay_sec:.6f},asetpts=PTS-STARTPTS[out]"
 
         cmd = [
-            "ffmpeg", "-y",
-            "-i", src,
-            "-i", sync,
+            resolve_tool("ffmpeg"), "-y",
+            "-i", sync,  # Yalnızca sync/hedef dosya
             "-filter_complex", flt,
             "-map", "[out]",
         ]
@@ -560,36 +536,27 @@ class FFmpegWrapper:
         self, src: str, sync: str, delay_ms: float, abs_ms: float,
         channels: int, pcm_codec: str, output_sr: OutputSampleRate, out_path: str,
     ) -> tuple[list[str], str]:
-        """rubberband modu — yüksek kaliteli pitch-korumalı zaman uzatma.
+        """rubberband modu — yalnızca sync (hedef) ses çıktıya yazılır.
 
         librubberband tabanlı pitch-korumalı zaman uzatma kullanır.
         FFmpeg'in ``--enable-librubberband`` ile derlenmiş olması gerekir.
-
-        Erken başlayan akışın başını ``atrim`` ile kırpar, ardından
-        ``rubberband`` filtresi ile yüksek kaliteli yeniden örnekleme yapar.
-        Bu, ``atempo`` modundan daha yüksek ses kalitesi sağlar.
+        src (referans) ses çıktıya dahil edilmez.
         """
         delay_sec = abs_ms / 1000.0
+        delay_str = "|".join([f"{abs_ms:.3f}"] * channels)
+
+        _rb = "rubberband=tempo=1.0:pitch=1.0:transients=smooth:detector=compound"
 
         if delay_ms >= 0:
-            # sync ses ileride → kaynağın başını kırp + rubberband kalite iyileştirme
-            flt = (
-                f"[0:a]atrim=start={delay_sec:.6f},asetpts=PTS-STARTPTS,"
-                f"rubberband=tempo=1.0:pitch=1.0:transients=smooth:detector=compound[adj_src];"
-                f"[adj_src][1:a]amix=inputs=2:duration=shortest:dropout_transition=0[out]"
-            )
+            # Sync ses erkende → başına gecikme ekle + rubberband kalite iyileştirme
+            flt = f"[0:a]adelay={delay_str}:all=1,{_rb}[out]"
         else:
-            # sync ses geride → sync'in başını kırp + rubberband kalite iyileştirme
-            flt = (
-                f"[1:a]atrim=start={delay_sec:.6f},asetpts=PTS-STARTPTS,"
-                f"rubberband=tempo=1.0:pitch=1.0:transients=smooth:detector=compound[adj_sync];"
-                f"[0:a][adj_sync]amix=inputs=2:duration=shortest:dropout_transition=0[out]"
-            )
+            # Sync ses geçte → başından kırp + rubberband kalite iyileştirme
+            flt = f"[0:a]atrim=start={delay_sec:.6f},asetpts=PTS-STARTPTS,{_rb}[out]"
 
         cmd = [
-            "ffmpeg", "-y",
-            "-i", src,
-            "-i", sync,
+            resolve_tool("ffmpeg"), "-y",
+            "-i", sync,  # Yalnızca sync/hedef dosya
             "-filter_complex", flt,
             "-map", "[out]",
         ]
@@ -606,7 +573,7 @@ class FFmpegWrapper:
 
         resample_part = f"-ar {output_sr.rate} " if output_sr.needs_resample else ""
         summary = (
-            f"[rubberband] atrim={delay_sec:.3f}s+rubberband | "
+            f"[rubberband] delay={delay_ms:+.1f}ms | "
             f"{resample_part}-ac {channels} -acodec {pcm_codec} -rf64 auto"
         )
         return cmd, summary
@@ -615,37 +582,24 @@ class FFmpegWrapper:
         self, src: str, sync: str, delay_ms: float, abs_ms: float,
         channels: int, pcm_codec: str, output_sr: OutputSampleRate, out_path: str,
     ) -> tuple[list[str], str]:
-        """apad + atrim modu — sessizlik ekleme/kırpma tabanlı senkronizasyon.
+        """apad modu — yalnızca sync (hedef) ses çıktıya yazılır.
 
-        Gecikme yönüne göre erken başlayan akışın başını kırpar (``atrim``)
-        ve gerekirse sonuna sessizlik ekler (``apad``) böylece her iki akış
-        aynı uzunlukta kalır.
-
-        Not: ``apad`` filtresi sesin **sonuna** sessizlik ekler, başına değil.
-        Bu nedenle zaman kaydırma ``atrim`` ile yapılır; ``apad`` yalnızca
-        kırpılan akışın uzunluğunu korumak için kullanılır.
+        Gecikme yönüne göre sync sesine adelay veya atrim uygular.
+        src (referans) ses çıktıya dahil edilmez.
         """
-        delay_sec = abs_ms / 1000.0
+        delay_str = "|".join([f"{abs_ms:.3f}"] * channels)
 
         if delay_ms >= 0:
-            # sync ses ileride → kaynağın başını kırp + sonuna pad ekle
-            flt = (
-                f"[0:a]atrim=start={delay_sec:.6f},asetpts=PTS-STARTPTS,"
-                f"apad=whole_dur=0[trimmed_src];"
-                f"[trimmed_src][1:a]amix=inputs=2:duration=longest:dropout_transition=0[out]"
-            )
+            # Sync ses erkende → başına gecikme ekle
+            flt = f"[0:a]adelay={delay_str}:all=1[out]"
         else:
-            # sync ses geride → sync'in başını kırp + sonuna pad ekle
-            flt = (
-                f"[1:a]atrim=start={delay_sec:.6f},asetpts=PTS-STARTPTS,"
-                f"apad=whole_dur=0[trimmed_sync];"
-                f"[0:a][trimmed_sync]amix=inputs=2:duration=longest:dropout_transition=0[out]"
-            )
+            # Sync ses geçte → başından kırp
+            trim_sec = abs_ms / 1000.0
+            flt = f"[0:a]atrim=start={trim_sec:.6f},asetpts=PTS-STARTPTS[out]"
 
         cmd = [
-            "ffmpeg", "-y",
-            "-i", src,
-            "-i", sync,
+            resolve_tool("ffmpeg"), "-y",
+            "-i", sync,  # Yalnızca sync/hedef dosya
             "-filter_complex", flt,
             "-map", "[out]",
         ]
@@ -661,35 +615,31 @@ class FFmpegWrapper:
         ])
 
         resample_part = f"-ar {output_sr.rate} " if output_sr.needs_resample else ""
-        summary = f"[apad+atrim] ffmpeg … {resample_part}-ac {channels} -acodec {pcm_codec} -rf64 auto"
+        summary = f"[apad] ffmpeg … {resample_part}-ac {channels} -acodec {pcm_codec} -rf64 auto"
         return cmd, summary
 
     def _build_sync_asyncts(
         self, src: str, sync: str, delay_ms: float, abs_ms: float,
         channels: int, pcm_codec: str, output_sr: OutputSampleRate, out_path: str,
     ) -> tuple[list[str], str]:
-        """asyncts modu — eski FFmpeg otomatik ses senkronizasyonu.
+        """asyncts modu — yalnızca sync (hedef) ses çıktıya yazılır.
 
         aresample=async=1000 ile agresif senkronizasyon yapar.
-        Eski FFmpeg sürümleriyle uyumlu.
+        src (referans) ses çıktıya dahil edilmez.
         """
         delay_str = "|".join([f"{abs_ms:.3f}"] * channels)
 
         if delay_ms >= 0:
-            flt = (
-                f"[0:a]adelay={delay_str},aresample=async=1000[delayed_src];"
-                f"[delayed_src][1:a]amix=inputs=2:duration=longest:dropout_transition=0[out]"
-            )
+            # Sync ses erkende → başına gecikme ekle + asyncts
+            flt = f"[0:a]adelay={delay_str}:all=1,aresample=async=1000[out]"
         else:
-            flt = (
-                f"[1:a]adelay={delay_str},aresample=async=1000[delayed_sync];"
-                f"[0:a][delayed_sync]amix=inputs=2:duration=longest:dropout_transition=0[out]"
-            )
+            # Sync ses geçte → başından kırp + asyncts
+            trim_sec = abs_ms / 1000.0
+            flt = f"[0:a]atrim=start={trim_sec:.6f},asetpts=PTS-STARTPTS,aresample=async=1000[out]"
 
         cmd = [
-            "ffmpeg", "-y",
-            "-i", src,
-            "-i", sync,
+            resolve_tool("ffmpeg"), "-y",
+            "-i", sync,  # Yalnızca sync/hedef dosya
             "-filter_complex", flt,
             "-map", "[out]",
         ]
@@ -737,7 +687,7 @@ class FFmpegWrapper:
         codec = "ac3" if fmt == DeewFormat.DD else "eac3"
 
         cmd = [
-            "ffmpeg", "-y",
+            resolve_tool("ffmpeg"), "-y",
             "-i", input_wav,
             "-acodec", codec,
             "-b:a", f"{bitrate}k",
@@ -760,6 +710,132 @@ class FFmpegWrapper:
             raise RuntimeError(f"FFmpeg Dolby encoding error:\n{stderr_tail}")
 
         return cmd_summary
+
+    # ── FFmpeg AAC / FLAC / Opus Encoding ─────────────────────────────────
+
+    def encode_to_aac(
+        self,
+        input_path: str,
+        output_path: str,
+        bitrate: int = 256,
+        channels: int | None = None,
+    ) -> str:
+        """Encode audio to AAC format using FFmpeg.
+
+        Args:
+            input_path: Path to input audio file
+            output_path: Path to output .m4a file
+            bitrate: Bitrate in kbps
+            channels: Number of output channels (None = keep original)
+
+        Returns:
+            Summary string
+
+        Raises:
+            RuntimeError: If encoding fails
+        """
+        cmd = [
+            resolve_tool("ffmpeg"), "-y",
+            "-i", input_path,
+            "-c:a", "aac",
+            "-b:a", f"{bitrate}k",
+        ]
+        if channels is not None:
+            cmd.extend(["-ac", str(channels)])
+        cmd.append(output_path)
+
+        result = self._run_command(cmd, timeout=self._config.ffmpeg_timeout_sec)
+        if result.returncode != 0:
+            stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
+            raise RuntimeError(f"FFmpeg AAC encoding error:\n{stderr_tail}")
+
+        return f"AAC {bitrate} kbps"
+
+    def encode_to_flac(
+        self,
+        input_path: str,
+        output_path: str,
+        compression: int = 5,
+        bit_depth: int = 24,
+        channels: int | None = None,
+    ) -> str:
+        """Encode audio to FLAC format using FFmpeg.
+
+        Args:
+            input_path: Path to input audio file
+            output_path: Path to output .flac file
+            compression: Compression level 0-12
+            bit_depth: Bit depth (16 or 24)
+            channels: Number of output channels (None = keep original)
+
+        Returns:
+            Summary string
+
+        Raises:
+            RuntimeError: If encoding fails
+        """
+        compression = max(0, min(12, compression))
+        cmd = [
+            resolve_tool("ffmpeg"), "-y",
+            "-i", input_path,
+            "-c:a", "flac",
+            "-compression_level", str(compression),
+        ]
+        if channels is not None:
+            cmd.extend(["-ac", str(channels)])
+
+        # Add bit depth (sample format)
+        if bit_depth == 16:
+            cmd.extend(["-sample_fmt", "s16"])
+        elif bit_depth == 24:
+            cmd.extend(["-sample_fmt", "s32", "-bits_per_raw_sample", "24"])
+
+        cmd.append(output_path)
+
+        result = self._run_command(cmd, timeout=self._config.ffmpeg_timeout_sec)
+        if result.returncode != 0:
+            stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
+            raise RuntimeError(f"FFmpeg FLAC encoding error:\n{stderr_tail}")
+
+        return f"FLAC (compression={compression}, {bit_depth}-bit)"
+
+    def encode_to_opus(
+        self,
+        input_path: str,
+        output_path: str,
+        bitrate: int = 128,
+        channels: int | None = None,
+    ) -> str:
+        """Encode audio to Opus format using FFmpeg.
+
+        Args:
+            input_path: Path to input audio file
+            output_path: Path to output .opus file
+            bitrate: Bitrate in kbps
+            channels: Number of output channels (None = keep original)
+
+        Returns:
+            Summary string
+
+        Raises:
+            RuntimeError: If encoding fails
+        """
+        cmd = [
+            resolve_tool("ffmpeg"), "-y",
+            "-i", input_path,
+            "-c:a", "libopus",
+            "-b:a", f"{bitrate}k",
+        ]
+        if channels is not None:
+            cmd.extend(["-ac", str(channels)])
+        cmd.append(output_path)
+
+        result = self._run_command(cmd, timeout=self._config.ffmpeg_timeout_sec)
+        if result.returncode != 0:
+            stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
+            raise RuntimeError(f"FFmpeg Opus encoding error:\n{stderr_tail}")
+
+        return f"Opus {bitrate} kbps"
 
     # ── Yardımcı Metotlar ────────────────────────────────────────────────
 

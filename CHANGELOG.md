@@ -6,6 +6,37 @@
 
 ## English
 
+### [2.2.0] - 2026-04-02
+
+#### Added
+- **Unified encoder module** (`audio_sync/core/encoder.py`): New abstraction layer for encoding operations (AAC via qaac/FFmpeg, FLAC, Opus, Dolby DD/DDP via FFmpeg)
+- **FFmpeg-native Dolby encoding**: AC3 and EAC3 encoding directly via FFmpeg as an alternative to deew/DEE
+- **AAC encoding via qaac**: Apple AAC (TVBR/CVBR/ABR/CBR) encoding support through qaac
+- **FLAC encoding**: Lossless FLAC encoding with configurable compression level (0-12)
+- **Opus encoding**: Opus encoding with configurable bitrate
+- **Tool Paths configuration**: Optional custom paths for ffmpeg, ffprobe, qaac, and deew — falls back to system PATH when empty
+- **save_tool_paths() return value**: Now returns `bool` for success/failure with UI warning on save error
+
+#### Changed
+- **Renamed `ToolPaths.dee` to `ToolPaths.deew`**: The tool path field now correctly references the `deew` wrapper instead of the raw DEE binary, preventing `resolve_tool("dee")` from finding the wrong executable
+- **Cross-platform subprocess fix**: `encoder.py` uses `_PLATFORM_SUBPROCESS_KWARGS` dict instead of `creationflags` constant, preventing `TypeError` on Linux/macOS
+- **UI button state management**: `analyze_btn` is now disabled during processing and re-enabled in the `_process()` finally block alongside `run_btn`
+- **Removed fragile `locals().get()` pattern**: `needs_encoding` variable is now properly scoped before the try block
+- **Removed redundant pipeline assignment**: Eliminated duplicate `pipeline = self._encoding_pipeline_var.get()` call
+- **Merged README files**: Combined `README_EN.md` and `README_TR.md` into a single `README.md` with English on top and Turkish on bottom
+- Encoding pipeline parameters expanded with format-specific options (bitrate, quality, compression level)
+
+#### Fixed
+- **Deew/DEE tool resolution bug**: `resolve_tool("dee")` was finding `dee.exe` (raw Dolby Encoding Engine) instead of `deew` wrapper, causing "Unknown option: -i" errors
+- **Cross-platform crash**: `creationflags=0` passed to `subprocess.run()` on non-Windows systems now prevented
+- **Button state race condition**: Analyze button could remain enabled while processing was running
+
+#### Documentation
+- Merged bilingual README into single `README.md` with anchor-based language navigation
+- Removed `README_EN.md` and `README_TR.md`
+- Updated project structure to reflect new `encoder.py` module
+- Added qaac and Tool Paths documentation
+
 ### [2.1.0] - 2026-04-01
 
 #### Added
@@ -63,6 +94,36 @@
 
 ## Türkçe
 
+### [2.2.0] - 2026-04-02
+
+#### Eklenenler
+- **Birleşik encoder modülü** (`audio_sync/core/encoder.py`): Kodlama işlemleri için yeni soyutlama katmanı (qaac/FFmpeg ile AAC, FLAC, Opus, FFmpeg ile Dolby DD/DDP)
+- **FFmpeg-yerel Dolby kodlama**: deew/DEE alternatifi olarak doğrudan FFmpeg ile AC3 ve EAC3 kodlama
+- **qaac ile AAC kodlama**: qaac aracılığıyla Apple AAC (TVBR/CVBR/ABR/CBR) kodlama desteği
+- **FLAC kodlama**: Yapılandırılabilir sıkıştırma seviyesi (0-12) ile kayıpsız FLAC kodlama
+- **Opus kodlama**: Yapılandırılabilir bit hızı ile Opus kodlama
+- **Tool Paths yapılandırması**: ffmpeg, ffprobe, qaac ve deew için isteğe bağlı özel yollar — boş bırakıldığında sistem PATH'ine geri döner
+- **save_tool_paths() dönüş değeri**: Başarı/başarısızlık için `bool` döndürür, kaydetme hatasında UI uyarısı gösterir
+
+#### Değişenler
+- **`ToolPaths.dee` → `ToolPaths.deew` olarak yeniden adlandırıldı**: Tool path alanı artık ham DEE ikili dosyası yerine doğru şekilde `deew` sarmalayıcısına referans veriyor
+- **Platformlar arası subprocess düzeltmesi**: `encoder.py` artık `creationflags` sabiti yerine `_PLATFORM_SUBPROCESS_KWARGS` sözlüğü kullanıyor, Linux/macOS'ta `TypeError` önleniyor
+- **UI buton durum yönetimi**: `analyze_btn` artık işlem sırasında devre dışı bırakılıyor ve `_process()` finally bloğunda `run_btn` ile birlikte yeniden etkinleştiriliyor
+- **Kırılgan `locals().get()` kalıbı kaldırıldı**: `needs_encoding` değişkeni artık try bloğundan önce düzgün şekilde tanımlanıyor
+- **Gereksiz pipeline ataması kaldırıldı**: Tekrarlanan `pipeline = self._encoding_pipeline_var.get()` çağrısı silindi
+- **README dosyaları birleştirildi**: `README_EN.md` ve `README_TR.md` tek bir `README.md` dosyasında birleştirildi (İngilizce üstte, Türkçe altta)
+
+#### Düzeltilenler
+- **Deew/DEE araç çözümleme hatası**: `resolve_tool("dee")`, `deew` sarmalayıcısı yerine `dee.exe` (ham Dolby Encoding Engine) buluyordu, "Unknown option: -i" hatalarına neden oluyordu
+- **Platformlar arası çökme**: Windows dışı sistemlerde `subprocess.run()` için `creationflags=0` geçilmesi engellendi
+- **Buton durumu yarış koşulu**: İşlem devam ederken Analyze butonunun etkin kalabilmesi düzeltildi
+
+#### Dokümantasyon
+- İki dilli README tek `README.md` dosyasında çapa tabanlı dil navigasyonu ile birleştirildi
+- `README_EN.md` ve `README_TR.md` silindi
+- Proje yapısı yeni `encoder.py` modülünü yansıtacak şekilde güncellendi
+- qaac ve Tool Paths dokümantasyonu eklendi
+
 ### [2.1.0] - 2026-04-01
 
 #### Eklenenler
@@ -115,5 +176,6 @@
 - Önceden derlenmiş Windows EXE dağıtımı
 - MIT Lisansı
 
+[2.2.0]: https://github.com/blast1see/AudioSyncTool/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/blast1see/AudioSyncTool/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/blast1see/AudioSyncTool/releases/tag/v2.0.0
