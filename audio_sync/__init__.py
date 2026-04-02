@@ -1,6 +1,6 @@
 """Audio Sync Tool — Sağlam gecikme tespiti ve senkronizasyon aracı."""
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 # Lazy import: AudioSyncApp depends on tkinter which may not be available in
 # headless environments.  Importing it eagerly would break ``import audio_sync``

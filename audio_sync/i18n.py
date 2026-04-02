@@ -483,6 +483,290 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "İptal",
         "en": "Cancel",
     },
+
+    # ── Analyze Only ──
+    "analyze_only": {
+        "tr": "🔍  SADECE ANALİZ ET",
+        "en": "🔍  ANALYZE ONLY",
+    },
+    "analyzing": {
+        "tr": "Analiz ediliyor…",
+        "en": "Analyzing…",
+    },
+    "analyze_complete": {
+        "tr": "Analiz tamamlandı.",
+        "en": "Analysis complete.",
+    },
+    "analyze_result_header": {
+        "tr": "═══════════ ANALİZ SONUÇLARI ═══════════",
+        "en": "═══════════ ANALYSIS RESULTS ═══════════",
+    },
+    "sync_point_time": {
+        "tr": "⏱  Senkron Noktası: {time}",
+        "en": "⏱  Sync Point: {time}",
+    },
+    "delay_amount": {
+        "tr": "📐  Gecikme Miktarı: {delay_ms:.2f} ms ({description})",
+        "en": "📐  Delay Amount: {delay_ms:.2f} ms ({description})",
+    },
+    "confidence_score": {
+        "tr": "📊  Güven Oranı: {confidence:.1f}",
+        "en": "📊  Confidence Score: {confidence:.1f}",
+    },
+    "drift_amount": {
+        "tr": "📈  Kayma Miktarı: {drift:.3f} ms/dk",
+        "en": "📈  Drift Amount: {drift:.3f} ms/min",
+    },
+    "drift_none": {
+        "tr": "📈  Kayma Miktarı: Tespit edilemedi",
+        "en": "📈  Drift Amount: Not detected",
+    },
+    "coarse_delay": {
+        "tr": "🔎  Kaba Analiz Gecikmesi: {coarse_ms:.2f} ms",
+        "en": "🔎  Coarse Analysis Delay: {coarse_ms:.2f} ms",
+    },
+    "segments_used": {
+        "tr": "📋  Kullanılan Segmentler: {used}/{total}",
+        "en": "📋  Segments Used: {used}/{total}",
+    },
+    "analyze_no_files": {
+        "tr": "Lütfen analiz için kaynak ve senkron dosyalarını seçin.",
+        "en": "Please select source and sync files for analysis.",
+    },
+    "analyze_started": {
+        "tr": "🔍 Senkronizasyon analizi başlatılıyor…",
+        "en": "🔍 Starting synchronization analysis…",
+    },
+    "analyze_probing": {
+        "tr": "📡 Dosya bilgileri okunuyor…",
+        "en": "📡 Reading file information…",
+    },
+    "analyze_converting": {
+        "tr": "🔄 Analiz için WAV dönüşümü yapılıyor…",
+        "en": "🔄 Converting to WAV for analysis…",
+    },
+    "analyze_calculating": {
+        "tr": "⚡ Gecikme hesaplanıyor…",
+        "en": "⚡ Calculating delay…",
+    },
+    "analyze_src_info": {
+        "tr": "📁 Kaynak: {channels}ch / {bits}bit / {sample_rate}Hz",
+        "en": "📁 Source: {channels}ch / {bits}bit / {sample_rate}Hz",
+    },
+    "analyze_sync_info": {
+        "tr": "📁 Senkron: {channels}ch / {bits}bit / {sample_rate}Hz",
+        "en": "📁 Sync: {channels}ch / {bits}bit / {sample_rate}Hz",
+    },
+    "confidence_high": {
+        "tr": "Yüksek",
+        "en": "High",
+    },
+    "confidence_medium": {
+        "tr": "Orta",
+        "en": "Medium",
+    },
+    "confidence_low": {
+        "tr": "Düşük",
+        "en": "Low",
+    },
+
+    # ── Encoding Panel ──
+    "encoding_pipeline": {
+        "tr": "Çıktı Kodlama",
+        "en": "Output Encoding",
+    },
+    "encoding_none": {
+        "tr": "Kodlama Yok (Sadece Senkronize)",
+        "en": "No Encoding (Sync Only)",
+    },
+    "encoding_dolby": {
+        "tr": "Dolby (DD/DDP)",
+        "en": "Dolby (DD/DDP)",
+    },
+    "encoding_ffmpeg": {
+        "tr": "FFmpeg (AAC/FLAC/Opus)",
+        "en": "FFmpeg (AAC/FLAC/Opus)",
+    },
+    "encoding_qaac": {
+        "tr": "qaac (AAC/M4A)",
+        "en": "qaac (AAC/M4A)",
+    },
+    "encoding_format": {
+        "tr": "Format",
+        "en": "Format",
+    },
+    "encoding_bitrate": {
+        "tr": "Bitrate (kbps)",
+        "en": "Bitrate (kbps)",
+    },
+    "encoding_compression": {
+        "tr": "Sıkıştırma Seviyesi",
+        "en": "Compression Level",
+    },
+    "encoding_quality": {
+        "tr": "Kalite",
+        "en": "Quality",
+    },
+    "encoding_mode": {
+        "tr": "Kodlama Modu",
+        "en": "Encoding Mode",
+    },
+    "encoding_he_aac": {
+        "tr": "HE-AAC Profili",
+        "en": "HE-AAC Profile",
+    },
+    "encoding_no_delay": {
+        "tr": "Gecikme Yok (--no-delay)",
+        "en": "No Delay (--no-delay)",
+    },
+    "encoding_started": {
+        "tr": "🔄 Kodlama başlatılıyor…",
+        "en": "🔄 Starting encoding…",
+    },
+    "encoding_complete": {
+        "tr": "✅ Kodlama tamamlandı: {summary}",
+        "en": "✅ Encoding complete: {summary}",
+    },
+    "encoding_error": {
+        "tr": "❌ Kodlama hatası: {error}",
+        "en": "❌ Encoding error: {error}",
+    },
+    "qaac_not_found": {
+        "tr": "qaac bulunamadı. Lütfen qaac'ı yükleyin ve PATH'e ekleyin (beklenen konum: C:\\qaac).",
+        "en": "qaac not found. Please install qaac and add it to PATH (expected at C:\\qaac).",
+    },
+    "ffmpeg_aac_label": {
+        "tr": "AAC (FFmpeg)",
+        "en": "AAC (FFmpeg)",
+    },
+    "ffmpeg_flac_label": {
+        "tr": "FLAC (FFmpeg)",
+        "en": "FLAC (FFmpeg)",
+    },
+    "ffmpeg_opus_label": {
+        "tr": "Opus (FFmpeg)",
+        "en": "Opus (FFmpeg)",
+    },
+    "qaac_tvbr_label": {
+        "tr": "True VBR (TVBR)",
+        "en": "True VBR (TVBR)",
+    },
+    "qaac_cvbr_label": {
+        "tr": "Constrained VBR (CVBR)",
+        "en": "Constrained VBR (CVBR)",
+    },
+    "qaac_abr_label": {
+        "tr": "ABR",
+        "en": "ABR",
+    },
+    "qaac_cbr_label": {
+        "tr": "CBR",
+        "en": "CBR",
+    },
+    "encoding_pipeline_label": {
+        "tr": "Kodlama Yöntemi",
+        "en": "Encoding Pipeline",
+    },
+    "aac_bitrate_label": {
+        "tr": "AAC Bitrate (kbps)",
+        "en": "AAC Bitrate (kbps)",
+    },
+    "flac_compression_label": {
+        "tr": "FLAC Sıkıştırma (0-8)",
+        "en": "FLAC Compression (0-8)",
+    },
+    "opus_bitrate_label": {
+        "tr": "Opus Bitrate (kbps)",
+        "en": "Opus Bitrate (kbps)",
+    },
+    "qaac_quality_label": {
+        "tr": "TVBR Kalite (0-127)",
+        "en": "TVBR Quality (0-127)",
+    },
+    "ffmpeg_flac_compression_label": {
+        "tr": "FLAC Sıkıştırma (0-12)",
+        "en": "FLAC Compression (0-12)",
+    },
+
+    # ── FLAC Bit Depth & Pipeline Fixes ──
+    "flac_bit_depth_label": {
+        "tr": "FLAC Bit Derinliği",
+        "en": "FLAC Bit Depth",
+    },
+    "flac_16bit": {
+        "tr": "16-bit",
+        "en": "16-bit",
+    },
+    "flac_24bit": {
+        "tr": "24-bit",
+        "en": "24-bit",
+    },
+    "intermediate_wav_cleanup": {
+        "tr": "🗑️ Ara WAV dosyası silindi.",
+        "en": "🗑️ Intermediate WAV file deleted.",
+    },
+    "sync_wav_output": {
+        "tr": "📝 Senkron WAV çıktısı oluşturuldu.",
+        "en": "📝 Sync WAV output created.",
+    },
+
+    # ── Tool Path Settings ──
+    "tool_paths_title": {
+        "tr": "Araç Yolları",
+        "en": "Tool Paths",
+    },
+    "tool_paths_description": {
+        "tr": "Harici araçlar için özel yollar belirleyin. Boş bırakılırsa sistem PATH'i kullanılır.",
+        "en": "Set custom paths for external tools. Leave empty to use system PATH.",
+    },
+    "tool_path_ffmpeg": {
+        "tr": "FFmpeg Yolu",
+        "en": "FFmpeg Path",
+    },
+    "tool_path_ffprobe": {
+        "tr": "FFprobe Yolu",
+        "en": "FFprobe Path",
+    },
+    "tool_path_qaac": {
+        "tr": "qaac Yolu",
+        "en": "qaac Path",
+    },
+    "tool_path_dee": {
+        "tr": "Deew Yolu",
+        "en": "Deew Path",
+    },
+    "tool_path_browse": {
+        "tr": "Gözat…",
+        "en": "Browse…",
+    },
+    "tool_path_clear": {
+        "tr": "Temizle",
+        "en": "Clear",
+    },
+    "tool_path_using_path": {
+        "tr": "Sistem PATH kullanılıyor",
+        "en": "Using system PATH",
+    },
+    "tool_path_custom": {
+        "tr": "Özel yol: {path}",
+        "en": "Custom path: {path}",
+    },
+    "tool_path_not_found": {
+        "tr": "⚠ Araç bulunamadı",
+        "en": "⚠ Tool not found",
+    },
+    "tool_path_found": {
+        "tr": "✓ Bulundu: {path}",
+        "en": "✓ Found: {path}",
+    },
+    "tool_paths_saved": {
+        "tr": "Araç yolları kaydedildi.",
+        "en": "Tool paths saved.",
+    },
+    "tool_paths_button": {
+        "tr": "⚙ Araç Yolları",
+        "en": "⚙ Tool Paths",
+    },
 }
 
 

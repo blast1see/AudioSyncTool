@@ -2,8 +2,115 @@
 
 from __future__ import annotations
 
+import dataclasses
+import enum
+import json
+import os
+import shutil
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
+
+
+# ── Tool Path Resolution ─────────────────────────────────────────────
+_TOOL_PATHS_DIR = Path.home() / ".audio_sync_tool"
+_TOOL_PATHS_FILE = _TOOL_PATHS_DIR / "tool_paths.json"
+
+# qaac binary candidates — 64-bit build is preferred
+_QAAC_CANDIDATES = ("qaac64", "qaac")
+
+
+@dataclasses.dataclass
+class ToolPaths:
+    """User-configurable paths for external tools.
+    
+    When a path is None, the tool is resolved via system PATH.
+    When a path is set, that exact path is used instead.
+    """
+    ffmpeg: str | None = None
+    ffprobe: str | None = None
+    qaac: str | None = None
+    deew: str | None = None
+
+    def to_dict(self) -> dict:
+        return {k: v for k, v in dataclasses.asdict(self).items() if v is not None}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ToolPaths":
+        fields = {f.name for f in dataclasses.fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in fields})
+
+
+def _load_tool_paths() -> ToolPaths:
+    """Load tool paths from persistent JSON config."""
+    try:
+        if _TOOL_PATHS_FILE.is_file():
+            data = json.loads(_TOOL_PATHS_FILE.read_text(encoding="utf-8"))
+            return ToolPaths.from_dict(data.get("tool_paths", {}))
+    except Exception:
+        pass
+    return ToolPaths()
+
+
+def save_tool_paths(paths: ToolPaths) -> bool:
+    """Save tool paths to persistent JSON config.
+
+    Returns:
+        True if saved successfully, False on I/O error.
+    """
+    global TOOL_PATHS
+    TOOL_PATHS = paths
+    try:
+        _TOOL_PATHS_DIR.mkdir(parents=True, exist_ok=True)
+        data = {"version": 1, "tool_paths": paths.to_dict()}
+        _TOOL_PATHS_FILE.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return True
+    except Exception:
+        return False
+
+
+def resolve_tool(name: str) -> str:
+    """Resolve an external tool to its executable path.
+    
+    Resolution order:
+    1. User-configured custom path in TOOL_PATHS (if set and file exists)
+    2. System PATH lookup via shutil.which()
+    3. For qaac: tries qaac64 first, then qaac
+    
+    Args:
+        name: Tool name — one of "ffmpeg", "ffprobe", "qaac", "deew"
+        
+    Returns:
+        Resolved executable path or name (for PATH-based lookup)
+        
+    Raises:
+        OSError: If the tool cannot be found
+    """
+    # Check user-configured custom path
+    custom = getattr(TOOL_PATHS, name, None)
+    if custom and os.path.isfile(custom):
+        return custom
+    
+    # Special handling for qaac — try qaac64 first
+    if name == "qaac":
+        for candidate in _QAAC_CANDIDATES:
+            found = shutil.which(candidate)
+            if found:
+                return found
+        raise OSError(
+            f"qaac not found. Please install qaac and add it to PATH "
+            f"(expected at C:\\qaac). The binary may be named qaac64.exe."
+        )
+    
+    # Standard PATH lookup
+    found = shutil.which(name)
+    if found:
+        return found
+    
+    raise OSError(f"{name} not found in PATH. Please install {name} or set a custom path.")
 
 
 # ── Senkronizasyon Modu ──────────────────────────────────────────────────────
@@ -380,6 +487,62 @@ FFMPEG_AC3_DEFAULT_BITRATE: int = 448
 FFMPEG_EAC3_DEFAULT_BITRATE: int = 640
 
 
+# ── Encoding Pipeline ─────────────────────────────────────────────
+class EncodingPipeline(enum.Enum):
+    """Top-level encoding pipeline selector."""
+    NONE = "none"
+    DOLBY = "dolby"
+    FFMPEG = "ffmpeg"
+    QAAC = "qaac"
+    # NATIVE removed — FLAC/Opus now handled by FFmpeg
+
+
+class FFmpegOutputFormat(enum.Enum):
+    """FFmpeg output format options."""
+    AAC = ("aac", ".m4a", "AAC (FFmpeg)")
+    FLAC = ("flac", ".flac", "FLAC (FFmpeg)")
+    OPUS = ("libopus", ".opus", "Opus (FFmpeg)")
+
+    def __init__(self, codec: str, ext: str, label: str) -> None:
+        self.codec = codec
+        self.ext = ext
+        self.label = label
+
+
+@dataclasses.dataclass(frozen=True)
+class FFmpegEncodeConfig:
+    """FFmpeg encoding configuration."""
+    format: FFmpegOutputFormat = FFmpegOutputFormat.AAC
+    aac_bitrate: int = 256          # kbps for AAC
+    flac_compression: int = 5       # 0-12 for FLAC
+    flac_bit_depth: int = 24        # 16 or 24
+    opus_bitrate: int = 128         # kbps for Opus
+
+
+class QaacMode(enum.Enum):
+    """qaac encoding mode."""
+    TVBR = ("--tvbr", "True VBR (TVBR)")
+    CVBR = ("--cvbr", "Constrained VBR (CVBR)")
+    ABR = ("--abr", "ABR")
+    CBR = ("--cbr", "CBR")
+
+    def __init__(self, flag: str, label: str) -> None:
+        self.flag = flag
+        self.label = label
+
+
+@dataclasses.dataclass(frozen=True)
+class QaacConfig:
+    """qaac encoder configuration."""
+    mode: QaacMode = QaacMode.TVBR
+    tvbr_quality: int = 91          # 0-127 for TVBR
+    cvbr_bitrate: int = 256         # kbps for CVBR
+    abr_bitrate: int = 256          # kbps for ABR
+    cbr_bitrate: int = 256          # kbps for CBR
+    he_aac: bool = False            # Use HE-AAC profile
+    no_delay: bool = True           # --no-delay flag
+
+
 # ── Varsayılan Örnekler ─────────────────────────────────────────────────────
 
 THEME = Theme()
@@ -387,6 +550,9 @@ FONTS = Fonts()
 SYNC_CONFIG = SyncConfig()
 DEEW_CONFIG = DeewConfig()
 FPS_CONFIG = FpsConfig()
+FFMPEG_ENCODE_CONFIG = FFmpegEncodeConfig()
+QAAC_CONFIG = QaacConfig()
+TOOL_PATHS = _load_tool_paths()
 
 # Supported audio file extensions
 SUPPORTED_AUDIO_EXTENSIONS_LIST: tuple[str, ...] = (
