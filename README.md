@@ -9,7 +9,7 @@
 
 **A robust audio delay detection and synchronization tool with a modern dark-themed GUI.**
 
-[English](#english) | [Turkce](#turkce)
+[English](#english) | [Türkçe](#turkce)
 
 </div>
 
@@ -243,47 +243,47 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed list of changes in each version.
 
 <a id="turkce"></a>
 
-## Turkce
+## Türkçe
 
-### Hakkinda
+### Hakkında
 
-**Audio Sync Tool**, modern karanlik temali bir arayuze sahip, saglam bir ses gecikme tespiti ve senkronizasyon aracidir. Iki ses dosyasini analiz eder, aralarindaki zaman farkini capraz korelasyon kullanarak tespit eder ve mukemmel sekilde senkronize edilmis bir cikti uretir. Senkronize olmayan dublajlar, hizalanmamis ses parcalari veya FPS donusturulmus iceriklerle ugrasıyor olun, Audio Sync Tool hepsini hassasiyetle halleder.
+**Audio Sync Tool**, modern karanlık temalı bir arayüze sahip, sağlam bir ses gecikme tespiti ve senkronizasyon aracıdır. İki ses dosyasını analiz eder, aralarındaki zaman farkını çapraz korelasyon kullanarak tespit eder ve mükemmel şekilde senkronize edilmiş bir çıktı üretir. Senkronize olmayan dublajlar, hizalanmamış ses parçaları veya FPS dönüştürülmüş içeriklerle uğraşıyor olun, Audio Sync Tool hepsini hassasiyetle halleder.
 
-### Ekran Goruntusu
+### Ekran Görüntüsü
 
 <img width="802" height="1392" alt="2026-04-02 19_27_06-Audio Sync Tool-TR" src="https://github.com/user-attachments/assets/106d8021-baec-4f75-9e2a-2f46f347c6be" />
 
-### Temel Ozellikler
+### Temel Özellikler
 
-- **Capraz korelasyon tabanli gecikme tespiti** — saglam ve dogru ofset hesaplama
+- **Çapraz korelasyon tabanlı gecikme tespiti** — sağlam ve doğru ofset hesaplama
 - **6 senkronizasyon modu** — adelay+amix, aresample, atempo, rubberband, apad+atrim, asyncts
-- **MKV/MP4 konteyner destegi** — otomatik algilama ve ses akisi cikarma
-- **Surukle & birak dosya destegi** — tkinterdnd2 ile sorunsuz dosya yukleme
-- **Dolby Digital (AC3) ve Dolby Digital Plus (EAC3) kodlama** — FFmpeg veya [deew](https://github.com/pcroland/deew) / DEE araciligiyla
-- **AAC kodlama** — FFmpeg veya [qaac](https://github.com/nu774/qaac) (Apple AAC) araciligiyla
-- **FLAC & Opus kodlama** — FFmpeg araciligiyla
-- **FPS donusumu** — 23.976 <-> 25 <-> 29.97 vb.
-- **Iki dilli arayuz** — Ingilizce / Turkce
-- **Karanlik temali modern arayuz** — goz yormayan tasarim
-- **Orijinal ses kalitesini korur** — bit derinligi, ornekleme hizi, kanal sayisi
-- **Tool Paths** — ffmpeg, ffprobe, qaac, deew icin istege bagli ozel yollar (yoksa sistem PATH kullanilir)
+- **MKV/MP4 konteyner desteği** — otomatik algılama ve ses akışı çıkarma
+- **Sürükle & bırak dosya desteği** — tkinterdnd2 ile sorunsuz dosya yükleme
+- **Dolby Digital (AC3) ve Dolby Digital Plus (EAC3) kodlama** — FFmpeg veya [deew](https://github.com/pcroland/deew) / DEE aracılığıyla
+- **AAC kodlama** — FFmpeg veya [qaac](https://github.com/nu774/qaac) (Apple AAC) aracılığıyla
+- **FLAC & Opus kodlama** — FFmpeg aracılığıyla
+- **FPS dönüşümü** — 23.976 <-> 25 <-> 29.97 vb.
+- **İki dilli arayüz** — İngilizce / Türkçe
+- **Karanlık temalı modern arayüz** — göz yormayan tasarım
+- **Orijinal ses kalitesini korur** — bit derinliği, örnekleme hızı, kanal sayısı
+- **Tool Paths** — ffmpeg, ffprobe, qaac, deew için isteğe bağlı özel yollar (yoksa sistem PATH'i kullanılır)
 
 ### Sistem Gereksinimleri
 
 | Gereksinim | Detaylar |
 |---|---|
-| **Python** | 3.10 veya uzeri |
-| **FFmpeg** | Gerekli — sistem PATH'inde bulunmali veya Tool Paths ile ayarlanmali |
-| **deew + DEE** | Istege bagli — DEE ile Dolby Digital / Dolby Digital Plus kodlama icin |
-| **qaac** | Istege bagli — Apple AAC kodlama icin |
+| **Python** | 3.10 veya üzeri |
+| **FFmpeg** | Gerekli — sistem PATH'inde bulunmalı veya Tool Paths ile ayarlanmalı |
+| **deew + DEE** | İsteğe bağlı — DEE ile Dolby Digital / Dolby Digital Plus kodlama için |
+| **qaac** | İsteğe bağlı — Apple AAC kodlama için |
 
 ### Kurulum
 
-#### Secenek 1: Hazir Windows Calistirilabilir Dosyasi
+#### Seçenek 1: Hazır Windows Çalıştırılabilir Dosyası
 
-[Releases](https://github.com/blast1see/AudioSyncTool/releases) sayfasindan en son `.exe` dosyasini indirin. Python kurulumu gerekmez.
+[Releases](https://github.com/blast1see/AudioSyncTool/releases) sayfasından en son `.exe` dosyasını indirin. Python kurulumu gerekmez.
 
-#### Secenek 2: Kaynak Koddan Calistirma
+#### Seçenek 2: Kaynak Koddan Çalıştırma
 
 ```bash
 git clone https://github.com/blast1see/AudioSyncTool.git
@@ -292,29 +292,29 @@ pip install -r requirements.txt
 python -m audio_sync
 ```
 
-#### Istege Bagli: Surukle & Birak Destegi
+#### İsteğe Bağlı: Sürükle & Bırak Desteği
 
 ```bash
 pip install tkinterdnd2
 ```
 
-> **Not:** `tkinterdnd2`, arayuzde surukle & birak islevselligini etkinlestirir. Uygulama bu paket olmadan da calisir, ancak dosya secimi yalnizca dosya tarayici diyalogu ile sinirli kalir.
+> **Not:** `tkinterdnd2`, arayüzde sürükle & bırak işlevselliğini etkinleştirir. Uygulama bu paket olmadan da çalışır, ancak dosya seçimi yalnızca dosya tarayıcı diyalogu ile sınırlı kalır.
 
-### Kullanim Kilavuzu
+### Kullanım Kılavuzu
 
-1. **Kaynak Sesi Secin** — "Gozat" dugmesine tiklayin veya senkronize edilmesi gereken ses dosyasini (gecikmeli olan) surukleyip birakin.
-2. **Senkronizasyon Hedefini Secin** — "Gozat" dugmesine tiklayin veya referans ses dosyasini (dogru zamanlamali olan) surukleyip birakin.
-3. **Ayarlari Yapilandirin:**
-   - Senkronizasyon modunu secin
-   - Cikti formatini ve kodlama seceneklerini ayarlayin
-   - Istege bagli olarak Dolby kodlama veya FPS donusumunu etkinlestirin
-4. **Senkronizasyonu Baslatin** — "Senkronizasyonu Baslat" dugmesine tiklayin. Arac gecikmeyi analiz edecek ve senkronize edilmis ciktiyi uretecektir.
+1. **Kaynak Sesi Seçin** — "Gözat" düğmesine tıklayın veya senkronize edilmesi gereken ses dosyasını (gecikmeli olan) sürükleyip bırakın.
+2. **Senkronizasyon Hedefini Seçin** — "Gözat" düğmesine tıklayın veya referans ses dosyasını (doğru zamanlamalı olan) sürükleyip bırakın.
+3. **Ayarları Yapılandırın:**
+   - Senkronizasyon modunu seçin
+   - Çıktı formatını ve kodlama seçeneklerini ayarlayın
+   - İsteğe bağlı olarak Dolby kodlama veya FPS dönüşümünü etkinleştirin
+4. **Senkronizasyonu Başlatın** — "Senkronizasyonu Başlat" düğmesine tıklayın. Araç gecikmeyi analiz edecek ve senkronize edilmiş çıktıyı üretecektir.
 
 ### Desteklenen Formatlar
 
-#### Ses Formatlari
+#### Ses Formatları
 
-| Format | Uzanti |
+| Format | Uzantı |
 |---|---|
 | Waveform Audio | `.wav` |
 | MP3 | `.mp3` |
@@ -329,9 +329,9 @@ pip install tkinterdnd2
 | Opus | `.opus` |
 | Windows Media Audio | `.wma` |
 
-#### Konteyner Formatlari (ses cikarma)
+#### Konteyner Formatları (ses çıkarma)
 
-| Format | Uzanti |
+| Format | Uzantı |
 |---|---|
 | Matroska Video | `.mkv` |
 | MPEG-4 Video | `.mp4` |
@@ -340,122 +340,122 @@ pip install tkinterdnd2
 | MPEG Transport Stream | `.ts` |
 | MPEG Transport Stream | `.mts` |
 
-### Senkronizasyon Modlari
+### Senkronizasyon Modları
 
-| Mod | Aciklama |
+| Mod | Açıklama |
 |---|---|
-| **adelay + amix** | Gecikme filtresi uygular ve ses akislarini karistirir. En iyi genel amacli mod. |
-| **aresample** | Zamanlamayi ayarlamak icin sesi yeniden ornekler. Kucuk kayma duzeltmeleri icin uygundur. |
-| **atempo** | Perde degistirmeden ses temposunu degistirir. Hiz tabanli senkronizasyon icin kullanislidir. |
-| **rubberband** | Rubber Band kutuphanesi ile yuksek kaliteli zaman uzatma. Kalite hassasiyeti gereken isler icin en iyisi. |
-| **apad + atrim** | Hedef sureye uymasi icin sesi doldurur ve kirpar. Basit ve etkili. |
-| **asyncts** | Asenkron zaman damgasi duzeltmesi. Degisken zamanlama iceren akislar icin uygundur. |
+| **adelay + amix** | Gecikme filtresi uygular ve ses akışlarını karıştırır. En iyi genel amaçlı mod. |
+| **aresample** | Zamanlamayı ayarlamak için sesi yeniden örnekler. Küçük kayma düzeltmeleri için uygundur. |
+| **atempo** | Perde değiştirmeden ses temposunu değiştirir. Hız tabanlı senkronizasyon için kullanışlıdır. |
+| **rubberband** | Rubber Band kütüphanesi ile yüksek kaliteli zaman uzatma. Kalite hassasiyeti gerektiren işler için en iyisi. |
+| **apad + atrim** | Hedef süreye uyması için sesi doldurur ve kırpar. Basit ve etkili. |
+| **asyncts** | Asenkron zaman damgası düzeltmesi. Değişken zamanlama içeren akışlar için uygundur. |
 
 ### Dolby Kodlama (DEE / deew)
 
-Audio Sync Tool, Dolby Digital (AC3) ve Dolby Digital Plus (EAC3) kodlama yetenekleri saglamak icin **[deew](https://github.com/pcroland/deew)** ile entegre calisir.
+Audio Sync Tool, Dolby Digital (AC3) ve Dolby Digital Plus (EAC3) kodlama yetenekleri sağlamak için **[deew](https://github.com/pcroland/deew)** ile entegre çalışır.
 
 #### Gereksinimler
 
-- **[deew](https://github.com/pcroland/deew)** — Dolby Encoding Engine sarmalayicisi (`pip install deew` ile kurulabilir)
-- **DEE (Dolby Encoding Engine)** — Tescilli Dolby kodlayici ikili dosyasi (deew tarafindan gereklidir)
+- **[deew](https://github.com/pcroland/deew)** — Dolby Encoding Engine sarmalayıcısı (`pip install deew` ile kurulabilir)
+- **DEE (Dolby Encoding Engine)** — Tescilli Dolby kodlayıcı ikili dosyası (deew tarafından gereklidir)
 
-#### Nasil Calisir
+#### Nasıl Çalışır
 
-1. Audio Sync Tool once FFmpeg kullanarak sesi senkronize eder
-2. Senkronize edilmis cikti daha sonra Dolby kodlama icin deew'e aktarilir
-3. Son cikti, duzgun sekilde kodlanmis bir AC3 veya EAC3 dosyasidir
+1. Audio Sync Tool önce FFmpeg kullanarak sesi senkronize eder
+2. Senkronize edilmiş çıktı daha sonra Dolby kodlama için deew'e aktarılır
+3. Son çıktı, düzgün şekilde kodlanmış bir AC3 veya EAC3 dosyasıdır
 
-> **Onemli:** DEE (Dolby Encoding Engine), deew tarafindan gerekli olan tescilli bir aractir. Kurulum talimatlari icin lutfen [deew dokumantasyonuna](https://github.com/pcroland/deew) basvurun.
+> **Önemli:** DEE (Dolby Encoding Engine), deew tarafından gerekli olan tescilli bir araçtır. Kurulum talimatları için lütfen [deew dokümantasyonuna](https://github.com/pcroland/deew) başvurun.
 
-### FPS Donusumu
+### FPS Dönüşümü
 
-Audio Sync Tool, video kaynaklari arasindaki kare hizi farkliliklarini telafi edebilir. Ses, hedeften farkli bir kare hizina sahip bir videodan cikarildiginda, arac ses suresini buna gore ayarlar.
+Audio Sync Tool, video kaynakları arasındaki kare hızı farklılıklarını telafi edebilir. Ses, hedeften farklı bir kare hızına sahip bir videodan çıkarıldığında, araç ses süresini buna göre ayarlar.
 
-Yaygin donusumler:
+Yaygın dönüşümler:
 - 23.976 fps <-> 25 fps (PAL <-> NTSC Film)
 - 23.976 fps <-> 29.97 fps
 - 25 fps <-> 29.97 fps
 
 ### EXE Derleme
 
-Bagimsiz bir Windows calistirilabilir dosyasi olusturmak icin:
+Bağımsız bir Windows çalıştırılabilir dosyası oluşturmak için:
 
 ```bash
 python setup.py
 ```
 
-Bu komut, PyInstaller kullanarak `dist/` dizininde tek bir `.exe` dosyasi olusturur.
+Bu komut, PyInstaller kullanarak `dist/` dizininde tek bir `.exe` dosyası oluşturur.
 
-### Proje Yapisi
+### Proje Yapısı
 
 ```
 AudioSyncTool/
-├── audio_sync.py            # Giris noktasi
-├── setup.py                 # PyInstaller derleme betigi
-├── create_icon.py           # Ikon olusturucu
-├── requirements.txt         # Python bagimliliklari
-├── LICENSE                  # MIT Lisansi
-├── README.md                # Dokumantasyon (EN + TR)
-├── CHANGELOG.md             # Surum gecmisi
-├── RELEASE_NOTES.md         # Surum notlari
+├── audio_sync.py            # Giriş noktası
+├── setup.py                 # PyInstaller derleme betiği
+├── create_icon.py           # İkon oluşturucu
+├── requirements.txt         # Python bağımlılıkları
+├── LICENSE                  # MIT Lisansı
+├── README.md                # Dokümantasyon (EN + TR)
+├── CHANGELOG.md             # Sürüm geçmişi
+├── RELEASE_NOTES.md         # Sürüm notları
 ├── audio_sync/
-│   ├── __init__.py          # Paket baslatma & surum
-│   ├── __main__.py          # Modul giris noktasi
-│   ├── config.py            # Yapilandirma yonetimi
-│   ├── i18n.py              # Uluslararasilastirma (EN/TR)
-│   ├── utils.py             # Yardimci fonksiyonlar
+│   ├── __init__.py          # Paket başlatma & sürüm
+│   ├── __main__.py          # Modül giriş noktası
+│   ├── config.py            # Yapılandırma yönetimi
+│   ├── i18n.py              # Uluslararasılaştırma (EN/TR)
+│   ├── utils.py             # Yardımcı fonksiyonlar
 │   ├── core/
 │   │   ├── __init__.py
-│   │   ├── analyzer.py      # Ses analizi & capraz korelasyon
-│   │   ├── encoder.py       # Birlesmis kodlama arayuzu
+│   │   ├── analyzer.py      # Ses analizi & çapraz korelasyon
+│   │   ├── encoder.py       # Birleşik kodlama arayüzü
 │   │   ├── deew_encoder.py  # Dolby kodlama entegrasyonu
-│   │   ├── ffmpeg_wrapper.py# FFmpeg komut olusturucu
+│   │   ├── ffmpeg_wrapper.py# FFmpeg komut oluşturucu
 │   │   └── models.py        # Veri modelleri
 │   └── ui/
 │       ├── __init__.py
 │       ├── app.py           # Ana uygulama penceresi
-│       ├── drop_zone.py     # Surukle & birak bileseni
-│       └── stream_dialog.py # Ses akisi secim diyalogu
+│       ├── drop_zone.py     # Sürükle & bırak bileşeni
+│       └── stream_dialog.py # Ses akışı seçim diyalogu
 ```
 
-### Bagimliliklar
+### Bağımlılıklar
 
 #### Gerekli
 
-| Paket | Amac |
+| Paket | Amaç |
 |---|---|
-| **numpy** | Ses analizi icin sayisal islemler |
-| **scipy** | Capraz korelasyon ve sinyal isleme |
-| **FFmpeg** | Ses cozme, kodlama ve isleme (sistem ikili dosyasi) |
+| **numpy** | Ses analizi için sayısal işlemler |
+| **scipy** | Çapraz korelasyon ve sinyal işleme |
+| **FFmpeg** | Ses çözme, kodlama ve işleme (sistem ikili dosyası) |
 
-#### Istege Bagli
+#### İsteğe Bağlı
 
-| Paket | Amac |
+| Paket | Amaç |
 |---|---|
-| **tkinterdnd2** | Arayuzde surukle & birak destegi |
+| **tkinterdnd2** | Arayüzde sürükle & bırak desteği |
 | **deew** | DEE ile Dolby Digital / Dolby Digital Plus kodlama |
 | **qaac** | Apple AAC kodlama |
 
-### Katkida Bulunma
+### Katkıda Bulunma
 
-Katkilarinizi bekliyoruz! Iste nasil yardimci olabilirsiniz:
+Katkılarınızı bekliyoruz! İşte nasıl yardımcı olabilirsiniz:
 
 1. Depoyu **fork** edin
-2. Bir ozellik dali **olusturun** (`git checkout -b feature/harika-ozellik`)
-3. Degisikliklerinizi **commit** edin (`git commit -m 'Harika ozellik ekle'`)
-4. Dali **push** edin (`git push origin feature/harika-ozellik`)
-5. Bir **Pull Request** acin
+2. Bir özellik dalı **oluşturun** (`git checkout -b feature/harika-ozellik`)
+3. Değişikliklerinizi **commit** edin (`git commit -m 'Harika ozellik ekle'`)
+4. Dalı **push** edin (`git push origin feature/harika-ozellik`)
+5. Bir **Pull Request** açın
 
-Lutfen kodunuzun mevcut stile uygun oldugundan ve uygun dokumantasyon icerdiginden emin olun.
+Lütfen kodunuzun mevcut stile uygun olduğundan ve uygun dokümantasyon içerdiğinden emin olun.
 
 ### Lisans
 
-Bu proje **MIT Lisansi** altinda lisanslanmistir — detaylar icin [LICENSE](LICENSE) dosyasina bakin.
+Bu proje **MIT Lisansı** altında lisanslanmıştır — detaylar için [LICENSE](LICENSE) dosyasına bakın.
 
-### Degisiklik Gunlugu
+### Değişiklik Günlüğü
 
-Her surumdeki degisikliklerin detayli listesi icin [CHANGELOG.md](CHANGELOG.md) dosyasina bakin.
+Her sürümdeki değişikliklerin detaylı listesi için [CHANGELOG.md](CHANGELOG.md) dosyasına bakın.
 
 ---
 
