@@ -1,46 +1,46 @@
-# Audio Sync Tool v2.2.1
+# Audio Sync Tool v2.2.2
 
 ## What's New / Yenilikler
 
-### Added format support
-- **DTS-HD input support** for `.dtshd` files
-- **Dolby TrueHD input support** for `.thd` files
-- Container stream probing now exposes richer codec metadata for stream selection
+### Synchronization fixes
+- Fixed the `atempo` mode for tiny offsets so small positive and negative delays now settle correctly
+- Corrected FPS slowdown/speedup indicator text to match the real conversion direction
+- Renamed sync modes so the UI now reflects the actual filters used by each mode
 
-### Improved stream extraction
-- DTS-HD streams are detected more accurately from FFmpeg metadata
-- Stream picker now shows a clearer codec/profile label
-- Extracted container streams use safer output extensions during temporary processing
+### Verification
+- All sync modes were smoke-tested with controlled offsets on Windows
+- FPS conversion outputs were checked against expected duration ratios
+- FFmpeg AC3/EAC3 output and Deew AC3/EAC3 output were both smoke-tested successfully
+- Direct `.thd` and `.dtshd` input decoding was verified with real sample files
 
-### Build and packaging
-- PyInstaller build excludes a large set of unrelated Conda packages
-- Windows EXE builds complete much faster and avoid bundling many unnecessary modules
-- Release package refreshed with the rebuilt `AudioSyncTool.exe`
+### Documentation and wording
+- Removed `Dolby` / `DEE` wording from app-facing text and repository docs
+- Updated README and changelog terminology to stay aligned with the current UI
 
 ---
 
 ## Turkce
 
-### Eklenen format destegi
-- `.dtshd` uzantili **DTS-HD** dosyalari destekleniyor
-- `.thd` uzantili **Dolby TrueHD** dosyalari destekleniyor
-- Container stream taramasi artik daha zengin codec metadata bilgisi uretiyor
+### Senkronizasyon duzeltmeleri
+- `atempo` modu kucuk ofsetlerde duzeltildi; artik kucuk pozitif ve negatif gecikmeler dogru sekilde sifirlaniyor
+- FPS yavaslatma/hizlandirma gosterge metni gercek donusum yonu ile uyumlu hale getirildi
+- Senkron mod adlari, UI'da kullanilan gercek filtrelerle uyumlu olacak sekilde guncellendi
 
-### Iyilestirilen stream cikarma
-- DTS-HD stream'leri FFmpeg metadata bilgisinden daha dogru algilaniyor
-- Stream secim penceresi daha acik codec/profile etiketi gosteriyor
-- Container icinden cikarilan gecici ses dosyalari daha guvenli uzantilarla olusturuluyor
+### Dogrulama
+- Tum senkron modlari Windows uzerinde kontrollu ofsetlerle smoke testten gecirildi
+- FPS donusumu ciktilari beklenen sure oranlari ile karsilastirildi
+- FFmpeg AC3/EAC3 ciktilari ve Deew AC3/EAC3 ciktilari basariyla smoke test edildi
+- Gercek ornek dosyalarla dogrudan `.thd` ve `.dtshd` decode dogrulamasi yapildi
 
-### Derleme ve paketleme
-- PyInstaller derlemesi, ilgisiz Conda paketlerini disarida birakacak sekilde daraltildi
-- Windows EXE derlemesi daha hizli tamamlaniyor ve gereksiz moduller daha az paketleniyor
-- Release paketi, yeniden olusturulan `AudioSyncTool.exe` ile yenilendi
+### Dokumantasyon ve metinler
+- Uygulama metinlerinden ve repo dokumantasyonundan `Dolby` / `DEE` ifadeleri kaldirildi
+- README ve changelog terminolojisi guncel UI ile uyumlu hale getirildi
 
 ---
 
 ## Installation / Kurulum
 
-**Windows**: Download `AudioSyncTool-v2.2.1-win64.zip` from the assets below.
+**Windows**: Download `AudioSyncTool-v2.2.2-win64.zip` from the assets below.
 
 **From source**:
 ```bash

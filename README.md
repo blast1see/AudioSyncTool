@@ -5,7 +5,7 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square)](https://github.com/blast1see/AudioSyncTool)
-[![Release](https://img.shields.io/badge/Release-v2.2.1-orange?style=flat-square)](https://github.com/blast1see/AudioSyncTool/releases)
+[![Release](https://img.shields.io/badge/Release-v2.2.2-orange?style=flat-square)](https://github.com/blast1see/AudioSyncTool/releases)
 
 **A robust audio delay detection and synchronization tool with a modern dark-themed GUI.**
 
@@ -34,10 +34,10 @@
 ### Key Features
 
 - **Cross-correlation based delay detection** — robust & accurate offset calculation
-- **6 synchronization modes** — adelay+amix, aresample, atempo, rubberband, apad+atrim, asyncts
+- **6 synchronization modes** — adelay/atrim, aresample, atempo, rubberband, delay/trim, async resample
 - **MKV/MP4 container support** — auto-detect and extract audio streams
 - **Drag & drop file support** — seamless file loading with tkinterdnd2
-- **Dolby Digital (AC3) and Dolby Digital Plus (EAC3) encoding** — via FFmpeg or [deew](https://github.com/pcroland/deew) / DEE
+- **AC3 and EAC3 encoding** — via FFmpeg or [deew](https://github.com/pcroland/deew)
 - **AAC encoding** — via FFmpeg or [qaac](https://github.com/nu774/qaac) (Apple AAC)
 - **FLAC & Opus encoding** — via FFmpeg
 - **FPS conversion** — 23.976 <-> 25 <-> 29.97 etc.
@@ -52,7 +52,7 @@
 |---|---|
 | **Python** | 3.10 or higher |
 | **FFmpeg** | Required — must be in system PATH or set via Tool Paths |
-| **deew + DEE** | Optional — for Dolby Digital / Dolby Digital Plus encoding via DEE |
+| **deew** | Optional — for AC3 / EAC3 encoding |
 | **qaac** | Optional — for Apple AAC encoding |
 
 ### Installation
@@ -85,7 +85,7 @@ pip install tkinterdnd2
 3. **Configure Settings:**
    - Choose the synchronization mode
    - Set output format and encoding options
-   - Optionally enable Dolby encoding or FPS conversion
+   - Optionally enable Deew encoding or FPS conversion
 4. **Start Sync** — Click the "Start Sync" button. The tool will analyze the delay and produce the synchronized output.
 
 ### Supported Formats
@@ -100,11 +100,11 @@ pip install tkinterdnd2
 | AAC | `.aac` |
 | Ogg Vorbis | `.ogg` |
 | MPEG-4 Audio | `.m4a` |
-| Dolby Digital | `.ac3` |
-| Dolby Digital Plus | `.eac3` |
+| AC3 | `.ac3` |
+| EAC3 | `.eac3` |
 | DTS | `.dts` |
 | DTS-HD | `.dtshd` |
-| Dolby TrueHD | `.thd` |
+| TrueHD | `.thd` |
 | Matroska Audio | `.mka` |
 | Opus | `.opus` |
 | Windows Media Audio | `.wma` |
@@ -124,29 +124,28 @@ pip install tkinterdnd2
 
 | Mode | Description |
 |---|---|
-| **adelay + amix** | Applies a delay filter and mixes audio streams. Best general-purpose mode. |
+| **adelay / atrim** | Applies delay or trim to the target audio only. Best general-purpose mode. |
 | **aresample** | Resamples audio to adjust timing. Good for minor drift corrections. |
 | **atempo** | Changes audio tempo without altering pitch. Useful for speed-based sync. |
 | **rubberband** | High-quality time-stretching using the Rubber Band library. Best for quality-sensitive work. |
-| **apad + atrim** | Pads and trims audio to match target duration. Simple and effective. |
-| **asyncts** | Asynchronous timestamp correction. Good for streams with variable timing. |
+| **delay / trim (simple)** | Applies straightforward delay or trim to the target audio. Simple and effective. |
+| **async resample (1000)** | Uses aggressive async resampling for difficult timing mismatches. |
 
-### Dolby Encoding (DEE / deew)
+### Deew Encoding
 
-Audio Sync Tool integrates with **[deew](https://github.com/pcroland/deew)** to provide Dolby Digital (AC3) and Dolby Digital Plus (EAC3) encoding capabilities.
+Audio Sync Tool integrates with **[deew](https://github.com/pcroland/deew)** to provide AC3 and EAC3 encoding capabilities.
 
 #### Requirements
 
-- **[deew](https://github.com/pcroland/deew)** — A Dolby Encoding Engine wrapper (install via `pip install deew`)
-- **DEE (Dolby Encoding Engine)** — The proprietary Dolby encoder binary (required by deew)
+- **[deew](https://github.com/pcroland/deew)** — install via `pip install deew`
 
 #### How it works
 
 1. Audio Sync Tool first synchronizes the audio using FFmpeg
-2. The synchronized output is then passed to deew for Dolby encoding
+2. The synchronized output is then passed to deew for AC3/EAC3 encoding
 3. The final output is a properly encoded AC3 or EAC3 file
 
-> **Important:** DEE (Dolby Encoding Engine) is a proprietary tool required by deew. Please refer to the [deew documentation](https://github.com/pcroland/deew) for setup instructions.
+> **Important:** Please refer to the [deew documentation](https://github.com/pcroland/deew) for setup instructions.
 
 ### FPS Conversion
 
@@ -189,7 +188,7 @@ AudioSyncTool/
 │   │   ├── __init__.py
 │   │   ├── analyzer.py      # Audio analysis & cross-correlation
 │   │   ├── encoder.py       # Unified encoding interface
-│   │   ├── deew_encoder.py  # Dolby encoding integration
+│   │   ├── deew_encoder.py  # Deew encoding integration
 │   │   ├── ffmpeg_wrapper.py# FFmpeg command builder
 │   │   └── models.py        # Data models
 │   └── ui/
@@ -214,7 +213,7 @@ AudioSyncTool/
 | Package | Purpose |
 |---|---|
 | **tkinterdnd2** | Drag & drop support in the GUI |
-| **deew** | Dolby Digital / Dolby Digital Plus encoding via DEE |
+| **deew** | AC3 / EAC3 encoding |
 | **qaac** | Apple AAC encoding |
 
 ### Contributing
@@ -258,10 +257,10 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed list of changes in each version.
 ### Temel Özellikler
 
 - **Çapraz korelasyon tabanlı gecikme tespiti** — sağlam ve doğru ofset hesaplama
-- **6 senkronizasyon modu** — adelay+amix, aresample, atempo, rubberband, apad+atrim, asyncts
+- **6 senkronizasyon modu** — adelay/atrim, aresample, atempo, rubberband, delay/trim, async resample
 - **MKV/MP4 konteyner desteği** — otomatik algılama ve ses akışı çıkarma
 - **Sürükle & bırak dosya desteği** — tkinterdnd2 ile sorunsuz dosya yükleme
-- **Dolby Digital (AC3) ve Dolby Digital Plus (EAC3) kodlama** — FFmpeg veya [deew](https://github.com/pcroland/deew) / DEE aracılığıyla
+- **AC3 ve EAC3 kodlama** — FFmpeg veya [deew](https://github.com/pcroland/deew) aracılığıyla
 - **AAC kodlama** — FFmpeg veya [qaac](https://github.com/nu774/qaac) (Apple AAC) aracılığıyla
 - **FLAC & Opus kodlama** — FFmpeg aracılığıyla
 - **FPS dönüşümü** — 23.976 <-> 25 <-> 29.97 vb.
@@ -276,7 +275,7 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed list of changes in each version.
 |---|---|
 | **Python** | 3.10 veya üzeri |
 | **FFmpeg** | Gerekli — sistem PATH'inde bulunmalı veya Tool Paths ile ayarlanmalı |
-| **deew + DEE** | İsteğe bağlı — DEE ile Dolby Digital / Dolby Digital Plus kodlama için |
+| **deew** | İsteğe bağlı — AC3 / EAC3 kodlama için |
 | **qaac** | İsteğe bağlı — Apple AAC kodlama için |
 
 ### Kurulum
@@ -309,7 +308,7 @@ pip install tkinterdnd2
 3. **Ayarları Yapılandırın:**
    - Senkronizasyon modunu seçin
    - Çıktı formatını ve kodlama seçeneklerini ayarlayın
-   - İsteğe bağlı olarak Dolby kodlama veya FPS dönüşümünü etkinleştirin
+   - İsteğe bağlı olarak Deew kodlama veya FPS dönüşümünü etkinleştirin
 4. **Senkronizasyonu Başlatın** — "Senkronizasyonu Başlat" düğmesine tıklayın. Araç gecikmeyi analiz edecek ve senkronize edilmiş çıktıyı üretecektir.
 
 ### Desteklenen Formatlar
@@ -324,11 +323,11 @@ pip install tkinterdnd2
 | AAC | `.aac` |
 | Ogg Vorbis | `.ogg` |
 | MPEG-4 Audio | `.m4a` |
-| Dolby Digital | `.ac3` |
-| Dolby Digital Plus | `.eac3` |
+| AC3 | `.ac3` |
+| EAC3 | `.eac3` |
 | DTS | `.dts` |
 | DTS-HD | `.dtshd` |
-| Dolby TrueHD | `.thd` |
+| TrueHD | `.thd` |
 | Matroska Audio | `.mka` |
 | Opus | `.opus` |
 | Windows Media Audio | `.wma` |
@@ -348,29 +347,28 @@ pip install tkinterdnd2
 
 | Mod | Açıklama |
 |---|---|
-| **adelay + amix** | Gecikme filtresi uygular ve ses akışlarını karıştırır. En iyi genel amaçlı mod. |
+| **adelay / atrim** | Yalnızca hedef sese gecikme veya kırpma uygular. En iyi genel amaçlı mod. |
 | **aresample** | Zamanlamayı ayarlamak için sesi yeniden örnekler. Küçük kayma düzeltmeleri için uygundur. |
 | **atempo** | Perde değiştirmeden ses temposunu değiştirir. Hız tabanlı senkronizasyon için kullanışlıdır. |
 | **rubberband** | Rubber Band kütüphanesi ile yüksek kaliteli zaman uzatma. Kalite hassasiyeti gerektiren işler için en iyisi. |
-| **apad + atrim** | Hedef süreye uyması için sesi doldurur ve kırpar. Basit ve etkili. |
-| **asyncts** | Asenkron zaman damgası düzeltmesi. Değişken zamanlama içeren akışlar için uygundur. |
+| **delay / trim (simple)** | Hedef sese doğrudan gecikme veya kırpma uygular. Basit ve etkilidir. |
+| **async resample (1000)** | Zor zamanlama uyuşmazlıkları için agresif async resample kullanır. |
 
-### Dolby Kodlama (DEE / deew)
+### Deew Kodlama
 
-Audio Sync Tool, Dolby Digital (AC3) ve Dolby Digital Plus (EAC3) kodlama yetenekleri sağlamak için **[deew](https://github.com/pcroland/deew)** ile entegre çalışır.
+Audio Sync Tool, AC3 ve EAC3 kodlama yetenekleri sağlamak için **[deew](https://github.com/pcroland/deew)** ile entegre çalışır.
 
 #### Gereksinimler
 
-- **[deew](https://github.com/pcroland/deew)** — Dolby Encoding Engine sarmalayıcısı (`pip install deew` ile kurulabilir)
-- **DEE (Dolby Encoding Engine)** — Tescilli Dolby kodlayıcı ikili dosyası (deew tarafından gereklidir)
+- **[deew](https://github.com/pcroland/deew)** — `pip install deew` ile kurulabilir
 
 #### Nasıl Çalışır
 
 1. Audio Sync Tool önce FFmpeg kullanarak sesi senkronize eder
-2. Senkronize edilmiş çıktı daha sonra Dolby kodlama için deew'e aktarılır
+2. Senkronize edilmiş çıktı daha sonra AC3/EAC3 kodlama için deew'e aktarılır
 3. Son çıktı, düzgün şekilde kodlanmış bir AC3 veya EAC3 dosyasıdır
 
-> **Önemli:** DEE (Dolby Encoding Engine), deew tarafından gerekli olan tescilli bir araçtır. Kurulum talimatları için lütfen [deew dokümantasyonuna](https://github.com/pcroland/deew) başvurun.
+> **Önemli:** Kurulum talimatları için lütfen [deew dokümantasyonuna](https://github.com/pcroland/deew) başvurun.
 
 ### FPS Dönüşümü
 
@@ -413,7 +411,7 @@ AudioSyncTool/
 │   │   ├── __init__.py
 │   │   ├── analyzer.py      # Ses analizi & çapraz korelasyon
 │   │   ├── encoder.py       # Birleşik kodlama arayüzü
-│   │   ├── deew_encoder.py  # Dolby kodlama entegrasyonu
+│   │   ├── deew_encoder.py  # Deew kodlama entegrasyonu
 │   │   ├── ffmpeg_wrapper.py# FFmpeg komut oluşturucu
 │   │   └── models.py        # Veri modelleri
 │   └── ui/
@@ -438,7 +436,7 @@ AudioSyncTool/
 | Paket | Amaç |
 |---|---|
 | **tkinterdnd2** | Arayüzde sürükle & bırak desteği |
-| **deew** | DEE ile Dolby Digital / Dolby Digital Plus kodlama |
+| **deew** | AC3 / EAC3 kodlama |
 | **qaac** | Apple AAC kodlama |
 
 ### Katkıda Bulunma

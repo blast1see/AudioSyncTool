@@ -6,11 +6,22 @@
 
 ## English
 
+### [2.2.2] - 2026-04-05
+
+#### Fixed
+- **`atempo` micro-offset synchronization**: tiny positive and negative delays now converge correctly instead of drifting further away
+- **FPS conversion indicator text**: slowdown/speedup direction labels now match the actual `atempo` behavior
+- **Sync mode naming**: UI and docs now reflect the real filters and behavior used by each mode
+
+#### Changed
+- **Deew-only wording cleanup**: removed `Dolby` / `DEE` mentions from the app text and public docs to reduce branding/licensing risk
+- **Verified encode paths**: FFmpeg AC3/EAC3 output and Deew AC3/EAC3 output were smoke-tested on Windows
+
 ### [2.2.1] - 2026-04-05
 
 #### Added
 - **DTS-HD input support**: `.dtshd` files are now accepted as direct audio inputs
-- **Dolby TrueHD input support**: `.thd` files are now accepted as direct audio inputs
+- **TrueHD input support**: `.thd` files are now accepted as direct audio inputs
 - **Richer container stream metadata**: stream probing now reads codec profile and long codec name for improved labeling
 
 #### Changed
@@ -19,14 +30,14 @@
 - **Lean PyInstaller build**: build script now excludes a large set of unrelated Conda and data-science modules to reduce packaging overhead
 
 #### Documentation
-- Updated README supported format tables with DTS-HD and Dolby TrueHD entries
+- Updated README supported format tables with DTS-HD and TrueHD entries
 - Refreshed release notes and release badge for v2.2.1
 
 ### [2.2.0] - 2026-04-02
 
 #### Added
-- **Unified encoder module** (`audio_sync/core/encoder.py`): New abstraction layer for encoding operations (AAC via qaac/FFmpeg, FLAC, Opus, Dolby DD/DDP via FFmpeg)
-- **FFmpeg-native Dolby encoding**: AC3 and EAC3 encoding directly via FFmpeg as an alternative to deew/DEE
+- **Unified encoder module** (`audio_sync/core/encoder.py`): New abstraction layer for encoding operations (AAC via qaac/FFmpeg, FLAC, Opus, AC3/EAC3 via FFmpeg)
+- **FFmpeg-native AC3/EAC3 encoding**: AC3 and EAC3 encoding directly via FFmpeg as an alternative to deew
 - **AAC encoding via qaac**: Apple AAC (TVBR/CVBR/ABR/CBR) encoding support through qaac
 - **FLAC encoding**: Lossless FLAC encoding with configurable compression level (0-12)
 - **Opus encoding**: Opus encoding with configurable bitrate
@@ -34,7 +45,7 @@
 - **save_tool_paths() return value**: Now returns `bool` for success/failure with UI warning on save error
 
 #### Changed
-- **Renamed `ToolPaths.dee` to `ToolPaths.deew`**: The tool path field now correctly references the `deew` wrapper instead of the raw DEE binary
+- **Renamed legacy `ToolPaths.dee` to `ToolPaths.deew`**: The tool path field now correctly references `deew`
 - **Cross-platform subprocess fix**: `encoder.py` uses `_PLATFORM_SUBPROCESS_KWARGS` instead of a Windows-only `creationflags` constant
 - **UI button state management**: `analyze_btn` is now disabled during processing and re-enabled in the `_process()` finally block alongside `run_btn`
 - **Removed fragile `locals().get()` pattern**: `needs_encoding` is now properly scoped before the try block
@@ -43,7 +54,7 @@
 - Encoding pipeline parameters expanded with format-specific options (bitrate, quality, compression level)
 
 #### Fixed
-- **Deew/DEE tool resolution bug**: `resolve_tool("dee")` was finding `dee.exe` instead of the `deew` wrapper
+- **Deew tool resolution bug**: legacy `dee.exe` detection could shadow the `deew` wrapper
 - **Cross-platform crash**: prevented `creationflags=0` from being passed to `subprocess.run()` on non-Windows systems
 - **Button state race condition**: Analyze button could remain enabled while processing was running
 
@@ -60,7 +71,7 @@
 - **Audio Stream Selection Dialog**: Lets you choose a stream when a container has multiple audio tracks
 - **Drag & Drop Support**: Native file drag and drop via tkinterdnd2 with visual feedback on hover
 - **Drop zone hint labels**: "or drag & drop file here" text shown in file selection areas
-- `.ec3` extension support as an alternate for EAC3 (Dolby Digital Plus)
+- `.ec3` extension support as an alternate for EAC3
 - `CODEC_EXTENSION_MAP` configuration constant for codec-to-extension mapping
 - `ALL_SUPPORTED_EXTENSIONS_LIST` combining audio and container extensions
 - New i18n keys for MKV/container handling, drag and drop, and common buttons
@@ -81,7 +92,7 @@
 - Temporary files from container extraction are now cleaned up on application exit
 - Race condition guard added for concurrent container extraction operations
 - Drop zone validates file extensions before accepting dropped files
-- Deew output file search now handles DEE writing to the input directory instead of the output directory
+- Deew output file search now handles output files being written to the input directory instead of the output directory
 
 #### Documentation
 - Complete bilingual README system: `README.md`, `README_EN.md`, `README_TR.md`
@@ -97,8 +108,8 @@
 #### Added
 - Initial public release
 - Cross-correlation based audio delay detection
-- 6 synchronization modes: adelay+amix, aresample, atempo, rubberband, apad+atrim, asyncts
-- Dolby Digital (AC3) and Dolby Digital Plus (EAC3) encoding via deew/DEE integration
+- 6 synchronization modes: adelay/atrim, aresample, atempo, rubberband, delay/trim, async resample
+- AC3 and EAC3 encoding via deew integration
 - FPS conversion support (23.976 <-> 25 <-> 29.97 etc.)
 - Bilingual UI (Turkish / English) with runtime language switching
 - Dark-themed modern tkinter interface
@@ -110,11 +121,22 @@
 
 ## Turkce
 
+### [2.2.2] - 2026-04-05
+
+#### Duzeltilenler
+- **`atempo` kucuk ofset senkronizasyonu**: kucuk pozitif ve negatif gecikmeler artik ters yone kaymak yerine dogru sekilde sifira yaklasiyor
+- **FPS donusumu gosterge metni**: yavaslatma/hizlandirma etiketleri artik gercek `atempo` davranisi ile uyumlu
+- **Senkron mod isimleri**: UI ve dokumantasyon, her modun gercekte kullandigi filtre ve davranisla uyumlu hale getirildi
+
+#### Degisenler
+- **Yalnizca Deew odakli metin temizligi**: uygulama metinlerinden ve dokumantasyondan `Dolby` / `DEE` ifadeleri kaldirilarak marka/lisans riski azaltildi
+- **Kodlama yollarinin dogrulanmasi**: Windows uzerinde FFmpeg AC3/EAC3 ciktilari ve Deew AC3/EAC3 ciktilari smoke test ile dogrulandi
+
 ### [2.2.1] - 2026-04-05
 
 #### Eklenenler
 - **DTS-HD giris destegi**: `.dtshd` dosyalari dogrudan ses girdisi olarak kabul ediliyor
-- **Dolby TrueHD giris destegi**: `.thd` dosyalari dogrudan ses girdisi olarak kabul ediliyor
+- **TrueHD giris destegi**: `.thd` dosyalari dogrudan ses girdisi olarak kabul ediliyor
 - **Daha zengin container stream metadata bilgisi**: stream taramasi codec profile ve long codec name alanlarini okuyarak daha net etiketleme sagliyor
 
 #### Degisenler
@@ -123,14 +145,14 @@
 - **Daha hafif PyInstaller derlemesi**: build betigi, ilgisiz Conda ve veri bilimi modullerini dislayarak paketleme yukunu azaltiyor
 
 #### Dokumantasyon
-- README desteklenen format tablolarina DTS-HD ve Dolby TrueHD eklendi
+- README desteklenen format tablolarina DTS-HD ve TrueHD eklendi
 - v2.2.1 icin release notlari ve release badge guncellendi
 
 ### [2.2.0] - 2026-04-02
 
 #### Eklenenler
 - **Birlesik encoder modulu** (`audio_sync/core/encoder.py`): Kodlama islemleri icin yeni soyutlama katmani
-- **FFmpeg-yerel Dolby kodlama**: deew/DEE alternatifi olarak dogrudan FFmpeg ile AC3 ve EAC3 kodlama
+- **FFmpeg-yerel AC3/EAC3 kodlama**: deew alternatifi olarak dogrudan FFmpeg ile AC3 ve EAC3 kodlama
 - **qaac ile AAC kodlama**: qaac araciligiyla Apple AAC (TVBR/CVBR/ABR/CBR) destegi
 - **FLAC kodlama**: Yapilandirilabilir sikistirma seviyesi (0-12) ile kayipsiz FLAC
 - **Opus kodlama**: Yapilandirilabilir bit hizi ile Opus
@@ -147,7 +169,7 @@
 - Kodlama pipeline parametreleri format bazli seceneklerle genisletildi
 
 #### Duzeltilenler
-- **Deew/DEE arac cozumleme hatasi**: `resolve_tool("dee")`, `dee.exe` bulup `deew` wrapper'i kacirabiliyordu
+- **Deew arac cozumleme hatasi**: eski `dee` yolu bazen `deew` wrapper'ini kacirabiliyordu
 - **Platformlar arasi cokme**: Windows disinda `creationflags=0` gecilmesi onlendi
 - **Buton durumu yaris kosulu**: Analyze butonu islem surerken aktif kalabiliyordu
 
@@ -184,7 +206,7 @@
 - Container cikarma gecici dosyalari cikista temizleniyor
 - Eszamanli container cikarma islemleri icin yaris durumu korumasi eklendi
 - Birakma alani, dosya uzantilarini kabul etmeden once dogruluyor
-- Deew cikti aramasi, DEE'nin ciktiyi giris dizinine yazmasi durumunu ele aliyor
+- Deew cikti aramasi, cikti dosyasinin giris dizinine yazilmasi durumunu ele aliyor
 
 #### Dokumantasyon
 - Tam iki dilli README sistemi: `README.md`, `README_EN.md`, `README_TR.md`
@@ -201,7 +223,7 @@
 - Ilk genel surum
 - Capraz korelasyon tabanli ses gecikme tespiti
 - 6 senkronizasyon modu
-- deew/DEE entegrasyonu ile AC3 ve EAC3 kodlama
+- deew entegrasyonu ile AC3 ve EAC3 kodlama
 - FPS donusum destegi
 - Calisma zamaninda dil degistirmeli iki dilli arayuz
 - Karanlik temali modern tkinter arayuzu
@@ -209,6 +231,7 @@
 - Onceden derlenmis Windows EXE dagitimi
 - MIT Lisansi
 
+[2.2.2]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.1...v2.2.2
 [2.2.1]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.0...v2.2.1
 [2.2.0]: https://github.com/blast1see/AudioSyncTool/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/blast1see/AudioSyncTool/compare/v2.0.0...v2.1.0

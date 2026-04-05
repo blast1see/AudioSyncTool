@@ -120,12 +120,12 @@ class SyncMode(Enum):
     """FFmpeg ses senkronizasyon filtre modları.
 
     Her mod farklı bir FFmpeg filtre stratejisi kullanır:
-        - ADELAY_AMIX: Varsayılan — adelay + amix ile gecikme uygulama ve karıştırma.
+        - ADELAY_AMIX: Varsayılan — adelay / atrim ile gecikme uygulama.
         - ARESAMPLE: aresample filtresi ile örnekleme oranı tabanlı senkronizasyon.
-        - ATEMPO: atempo filtresi ile tempo tabanlı ince ayar senkronizasyonu.
+        - ATEMPO: küçük farklarda tempo tabanlı ince ayar, büyük farklarda trim/delay.
         - RUBBERBAND: librubberband tabanlı yüksek kaliteli zaman uzatma/sıkıştırma.
-        - APAD: apad + atrim ile sessizlik ekleme/kırpma tabanlı senkronizasyon.
-        - ASYNCTS: asyncts (eski) filtresi ile otomatik ses senkronizasyonu.
+        - APAD: basit geciktirme/kırpma tabanlı senkronizasyon.
+        - ASYNCTS: agresif async resample tabanlı senkronizasyon.
 
     Attributes:
         filter_name: FFmpeg filtre adı.
@@ -134,24 +134,24 @@ class SyncMode(Enum):
         description_en: İngilizce açıklama.
     """
 
-    ADELAY_AMIX = ("adelay+amix", "adelay + amix (Default)",
-                   "Gecikme uygulama ve karıştırma — en güvenilir yöntem",
-                   "Delay application and mixing — most reliable method")
+    ADELAY_AMIX = ("adelay+amix", "adelay / atrim (Default)",
+                   "Gecikme uygulama / kırpma — en güvenilir yöntem",
+                   "Delay / trim synchronization — most reliable method")
     ARESAMPLE = ("aresample", "aresample",
                  "Örnekleme oranı tabanlı senkronizasyon",
                  "Sample rate based synchronization")
     ATEMPO = ("atempo", "atempo (trim + fine-tune)",
-              "Kırpma tabanlı senkronizasyon — sessizlik boşluğu oluşturmaz",
-              "Trim-based synchronization — no silence gaps")
+              "Küçük farklarda tempo ince ayarı, büyük farklarda kırpma/geciktirme",
+              "Tempo fine-tuning for tiny offsets, trim/delay for larger ones")
     RUBBERBAND = ("rubberband", "rubberband (high quality)",
                   "Kırpma + rubberband kalite iyileştirme (librubberband gerektirir)",
                   "Trim + rubberband quality enhancement (requires librubberband)")
-    APAD = ("apad+atrim", "apad + atrim",
-            "Sessizlik ekleme/kırpma tabanlı senkronizasyon",
-            "Silence padding/trimming based synchronization")
-    ASYNCTS = ("asyncts", "asyncts (legacy)",
-               "Otomatik ses senkronizasyonu (eski FFmpeg filtresi)",
-               "Automatic audio sync (legacy FFmpeg filter)")
+    APAD = ("delay+trim", "delay / trim (simple)",
+            "Basit geciktirme/kırpma tabanlı senkronizasyon",
+            "Simple delay/trim synchronization")
+    ASYNCTS = ("async-resample", "async resample (1000)",
+               "Agresif async resample tabanlı senkronizasyon",
+               "Aggressive async resample synchronization")
 
     def __init__(
         self, filter_name: str, display_name: str,
@@ -229,7 +229,7 @@ class FpsConversion(Enum):
         """FFmpeg ``atempo`` filtresi için hız oranını hesaplar.
 
         Returns:
-            Hız oranı.  >1.0 → yavaşlatma, <1.0 → hızlandırma.
+            Kaynak/hedef FPS oranı. Nihai ``atempo`` değeri bunun tersidir.
         """
         return self.source_fps / self.target_fps
 
@@ -313,6 +313,9 @@ class SyncConfig:
 
     # FFmpeg
     ffmpeg_timeout_sec: int = 300
+    ffmpeg_timeout_per_gib_sec: int = 120
+    ffmpeg_complex_format_bonus_sec: int = 300
+    ffmpeg_max_timeout_sec: int = 3600
     ffprobe_timeout_sec: int = 30
 
     # Drift uyarı eşiği (ms/dk)
@@ -325,8 +328,8 @@ class SyncConfig:
 class DeewFormat(Enum):
     """Deew çıktı format seçenekleri."""
 
-    DD = ("dd", "AC3 (Dolby Digital)", ".ac3", ())
-    DDP = ("ddp", "EAC3 (Dolby Digital Plus)", ".eac3", (".ec3",))
+    DD = ("dd", "AC3", ".ac3", ())
+    DDP = ("ddp", "EAC3", ".eac3", (".ec3",))
 
     def __init__(
         self, cli_value: str, display_name: str, extension: str,
@@ -467,9 +470,9 @@ def get_deew_bitrate_key(fmt: DeewFormat, downmix: DeewDownmix | None) -> str:
 
 
 class EncoderType(Enum):
-    """Dolby encoding için kullanılacak araç seçimi."""
+    """Deew pipeline için kullanılacak araç seçimi."""
 
-    DEE = ("dee", "DEE (Dolby Encoding Engine)")
+    DEEW = ("deew", "Deew")
     FFMPEG = ("ffmpeg", "FFmpeg")
 
     def __init__(self, cli_value: str, display_name: str) -> None:
@@ -491,7 +494,7 @@ FFMPEG_EAC3_DEFAULT_BITRATE: int = 640
 class EncodingPipeline(enum.Enum):
     """Top-level encoding pipeline selector."""
     NONE = "none"
-    DOLBY = "dolby"
+    DEEW = "deew"
     FFMPEG = "ffmpeg"
     QAAC = "qaac"
     # NATIVE removed — FLAC/Opus now handled by FFmpeg

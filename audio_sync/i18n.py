@@ -92,8 +92,8 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "MODE",
     },
     "sync_mode_note": {
-        "tr": "Not: Varsayılan mod (adelay+amix) çoğu durum için en uygun seçimdir.",
-        "en": "Note: Default mode (adelay+amix) is the best choice for most cases.",
+        "tr": "Not: Varsayılan mod (adelay / atrim) çoğu durum için en uygun seçimdir.",
+        "en": "Note: Default mode (adelay / atrim) is the best choice for most cases.",
     },
 
     # ── FPS Dönüşümü ──
@@ -122,12 +122,12 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "speedup",
     },
 
-    # ── Dolby Encoding ──
-    "dolby_encoding": {
-        "tr": "DOLBY ENCODING",
-        "en": "DOLBY ENCODING",
+    # ── Deew Encoding ──
+    "deew_encoding": {
+        "tr": "DEEW ENCODING",
+        "en": "DEEW ENCODING",
     },
-    "dolby_enable": {
+    "deew_enable": {
         "tr": "Senkronizasyon sonrası AC3/EAC3'e dönüştür",
         "en": "Convert to AC3/EAC3 after synchronization",
     },
@@ -159,25 +159,25 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "Dönüştürme sonrası ara WAV dosyasını sil",
         "en": "Delete intermediate WAV file after conversion",
     },
-    "dee_ready": {
-        "tr": "DEE ● hazır",
-        "en": "DEE ● ready",
+    "deew_ready": {
+        "tr": "Deew ● hazır",
+        "en": "Deew ● ready",
     },
-    "dee_not_installed": {
-        "tr": "DEE ● kurulu değil",
-        "en": "DEE ● not installed",
+    "deew_not_installed": {
+        "tr": "Deew ● kurulu değil",
+        "en": "Deew ● not installed",
     },
-    "dee_desc": {
-        "tr": "  → Dolby Encoding Engine (yüksek kalite, DEE gerektirir)",
-        "en": "  → Dolby Encoding Engine (high quality, requires DEE)",
+    "deew_desc": {
+        "tr": "  → Deew ile AC3/EAC3 çıktı oluştur",
+        "en": "  → Create AC3/EAC3 output with Deew",
     },
     "ffmpeg_enc_desc": {
         "tr": "  → FFmpeg dahili AC3/EAC3 encoder (ek araç gerektirmez)",
         "en": "  → FFmpeg built-in AC3/EAC3 encoder (no additional tools required)",
     },
-    "dee_note": {
-        "tr": "Not: Deew, Dolby Encoding Engine (DEE) gerektirir.",
-        "en": "Note: Deew requires Dolby Encoding Engine (DEE).",
+    "deew_note": {
+        "tr": "Not: Deew kurulu ve çalışır durumda olmalıdır.",
+        "en": "Note: Deew must be installed and working.",
     },
     "ffmpeg_enc_note": {
         "tr": "Not: FFmpeg dahili encoder kullanılır, ek kurulum gerekmez.",
@@ -356,18 +356,18 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Synchronization mode: {mode}",
     },
 
-    # ── Dolby Encoding Log ──
-    "log_ffmpeg_dolby_start": {
-        "tr": "FFmpeg ile Dolby encoding başlıyor…",
-        "en": "Starting Dolby encoding with FFmpeg…",
+    # ── Deew Encoding Log ──
+    "log_ffmpeg_deew_start": {
+        "tr": "FFmpeg ile Deew çıktısı için encode başlıyor…",
+        "en": "Starting FFmpeg encode for Deew output…",
     },
-    "log_dolby_info": {
+    "log_deew_info": {
         "tr": "Format: {fmt}  |  Bitrate: {br} kbps  |  Kanal: {ch}  |  Encoder: {enc}",
         "en": "Format: {fmt}  |  Bitrate: {br} kbps  |  Channel: {ch}  |  Encoder: {enc}",
     },
-    "log_ffmpeg_dolby_done": {
-        "tr": "✓ FFmpeg Dolby encoding tamamlandı → {name}",
-        "en": "✓ FFmpeg Dolby encoding completed → {name}",
+    "log_ffmpeg_deew_done": {
+        "tr": "✓ FFmpeg encode tamamlandı → {name}",
+        "en": "✓ FFmpeg encode completed → {name}",
     },
     "log_intermediate_wav_deleted": {
         "tr": "Ara WAV dosyası silindi.",
@@ -386,12 +386,12 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "WAV file preserved: {name}",
     },
     "log_deew_start": {
-        "tr": "Deew ile Dolby encoding başlıyor…",
-        "en": "Starting Dolby encoding with Deew…",
+        "tr": "Deew ile encoding başlıyor…",
+        "en": "Starting encoding with Deew…",
     },
-    "log_deew_dolby_done": {
-        "tr": "✓ Dolby encoding tamamlandı → {name}",
-        "en": "✓ Dolby encoding completed → {name}",
+    "log_deew_done": {
+        "tr": "✓ Deew encoding tamamlandı → {name}",
+        "en": "✓ Deew encoding completed → {name}",
     },
     "log_deew_error": {
         "tr": "✗ Deew hatası: {err}",
@@ -579,9 +579,9 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "Kodlama Yok (Sadece Senkronize)",
         "en": "No Encoding (Sync Only)",
     },
-    "encoding_dolby": {
-        "tr": "Dolby (DD/DDP)",
-        "en": "Dolby (DD/DDP)",
+    "encoding_deew": {
+        "tr": "Deew (DD/DDP)",
+        "en": "Deew (DD/DDP)",
     },
     "encoding_ffmpeg": {
         "tr": "FFmpeg (AAC/FLAC/Opus)",
@@ -731,7 +731,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "qaac Yolu",
         "en": "qaac Path",
     },
-    "tool_path_dee": {
+    "tool_path_deew": {
         "tr": "Deew Yolu",
         "en": "Deew Path",
     },
