@@ -1661,7 +1661,14 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
 
         def _extract_thread() -> None:
             """Background: extract audio stream."""
-            out_ext = CODEC_EXTENSION_MAP.get(codec, ".mka")
+            out_ext = next(
+                (
+                    s.get("suggested_ext", ".mka")
+                    for s in streams
+                    if int(s.get("index", -1)) == stream_index
+                ),
+                CODEC_EXTENSION_MAP.get(codec, ".mka"),
+            )
 
             fd, tmp_path = _tempfile_mod.mkstemp(
                 prefix=f"audiosync_{role}_", suffix=out_ext,

@@ -15,7 +15,16 @@ import sys
 import warnings
 from typing import Protocol
 
-from audio_sync.config import DeewFormat, FpsConversion, PcmCodec, SyncConfig, SyncMode, SYNC_CONFIG, resolve_tool
+from audio_sync.config import (
+    CODEC_EXTENSION_MAP,
+    DeewFormat,
+    FpsConversion,
+    PcmCodec,
+    SyncConfig,
+    SyncMode,
+    SYNC_CONFIG,
+    resolve_tool,
+)
 from audio_sync.core.models import AudioInfo, OutputSampleRate
 
 
@@ -171,7 +180,7 @@ class FFmpegWrapper:
             "-v", "error",
             "-select_streams", "a",
             "-show_entries",
-            "stream=index,codec_name,channels,sample_rate,bit_rate,bits_per_raw_sample",
+            "stream=index,codec_name,codec_long_name,profile,channels,sample_rate,bit_rate,bits_per_raw_sample",
             "-show_entries", "stream_tags=language,title",
             "-of", "json",
             path,
@@ -189,15 +198,20 @@ class FFmpegWrapper:
         streams: list[dict[str, str]] = []
         for s in data.get("streams", []):
             tags = s.get("tags", {})
-            streams.append({
+            stream_info = {
                 "index": str(s.get("index", 0)),
                 "codec_name": s.get("codec_name", "unknown"),
+                "codec_long_name": s.get("codec_long_name", ""),
+                "profile": s.get("profile", ""),
                 "channels": str(s.get("channels", 0)),
                 "sample_rate": str(s.get("sample_rate", 0)),
                 "bit_rate": str(s.get("bit_rate", "N/A")),
                 "language": tags.get("language", "und"),
                 "title": tags.get("title", ""),
-            })
+            }
+            stream_info["codec_display"] = self._get_stream_codec_display(stream_info)
+            stream_info["suggested_ext"] = self._get_stream_extension(stream_info)
+            streams.append(stream_info)
         return streams
 
     def extract_audio_stream(
@@ -883,6 +897,55 @@ class FFmpegWrapper:
                 key, value = line.split("=", 1)
                 info[key.strip()] = value.strip()
         return info
+
+    @staticmethod
+    def _get_stream_extension(stream: dict[str, str]) -> str:
+        """Return the preferred file extension for an extracted stream."""
+        codec_name = stream.get("codec_name", "unknown").lower()
+        # FFmpeg can demux raw DTS-HD inputs, but common builds do not expose a
+        # writable raw DTS-HD muxer. Keep extracted DTS-HD streams on the DTS
+        # extension so container extraction remains copy-safe.
+        if codec_name in {"dts", "dtshd"}:
+            return ".dts"
+        return CODEC_EXTENSION_MAP.get(codec_name, ".mka")
+
+    @staticmethod
+    def _get_stream_codec_display(stream: dict[str, str]) -> str:
+        """Build a more descriptive codec label for the stream picker."""
+        codec_name = stream.get("codec_name", "unknown")
+        profile = stream.get("profile", "").strip()
+
+        if codec_name.lower() == "dts" and FFmpegWrapper._is_dtshd_stream(stream):
+            return profile or "DTS-HD"
+        if codec_name.lower() == "truehd":
+            return profile or "TrueHD"
+        if profile:
+            return f"{codec_name} ({profile})"
+        return codec_name
+
+    @staticmethod
+    def _is_dtshd_stream(stream: dict[str, str]) -> bool:
+        """Detect DTS-HD variants from ffprobe stream metadata."""
+        if stream.get("codec_name", "").lower() != "dts":
+            return False
+
+        haystack = " ".join(
+            filter(
+                None,
+                (
+                    stream.get("profile", ""),
+                    stream.get("codec_long_name", ""),
+                ),
+            )
+        ).lower()
+        markers = (
+            "dts-hd",
+            "dts hd",
+            "master audio",
+            "high resolution",
+            "hra",
+        )
+        return any(marker in haystack for marker in markers)
 
     @staticmethod
     def _safe_int(value: str | None, default: int, minimum: int = 0) -> int:

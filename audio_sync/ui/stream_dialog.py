@@ -12,7 +12,7 @@ from audio_sync.i18n import t
 class StreamSelectionDialog(tk.Toplevel):
     """Dialog for selecting an audio stream from a container file.
 
-    Shows a list of audio streams with codec, channels, sample rate,
+    Shows a list of audio streams with codec/profile, channels, sample rate,
     language, and title information. The user selects one stream.
 
     Args:
@@ -79,7 +79,7 @@ class StreamSelectionDialog(tk.Toplevel):
             stream_frame.pack(fill="x", padx=8, pady=4)
 
             # Format stream info
-            codec = stream.get("codec_name", "unknown")
+            codec = stream.get("codec_display", stream.get("codec_name", "unknown"))
             channels = stream.get("channels", "?")
             sample_rate = stream.get("sample_rate", "?")
             language = stream.get("language", "und")

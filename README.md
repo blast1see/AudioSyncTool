@@ -103,6 +103,8 @@ pip install tkinterdnd2
 | Dolby Digital | `.ac3` |
 | Dolby Digital Plus | `.eac3` |
 | DTS | `.dts` |
+| DTS-HD | `.dtshd` |
+| Dolby TrueHD | `.thd` |
 | Matroska Audio | `.mka` |
 | Opus | `.opus` |
 | Windows Media Audio | `.wma` |
@@ -325,6 +327,8 @@ pip install tkinterdnd2
 | Dolby Digital | `.ac3` |
 | Dolby Digital Plus | `.eac3` |
 | DTS | `.dts` |
+| DTS-HD | `.dtshd` |
+| Dolby TrueHD | `.thd` |
 | Matroska Audio | `.mka` |
 | Opus | `.opus` |
 | Windows Media Audio | `.wma` |

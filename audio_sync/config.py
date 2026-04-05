@@ -557,7 +557,7 @@ TOOL_PATHS = _load_tool_paths()
 # Supported audio file extensions
 SUPPORTED_AUDIO_EXTENSIONS_LIST: tuple[str, ...] = (
     ".wav", ".mp3", ".flac", ".aac", ".ogg", ".m4a",
-    ".ac3", ".eac3", ".ec3", ".dts", ".mka", ".opus", ".wma",
+    ".ac3", ".eac3", ".ec3", ".dts", ".dtshd", ".thd", ".mka", ".opus", ".wma",
 )
 
 # Container formats that may contain multiple audio streams
@@ -576,7 +576,7 @@ SUPPORTED_AUDIO_EXTENSIONS: str = " ".join(
 # Codec name → file extension mapping (used for container stream extraction)
 CODEC_EXTENSION_MAP: dict[str, str] = {
     "aac": ".aac", "ac3": ".ac3", "eac3": ".eac3",
-    "dts": ".dts", "flac": ".flac", "opus": ".opus",
+    "dts": ".dts", "dtshd": ".dtshd", "flac": ".flac", "opus": ".opus",
     "mp3": ".mp3", "vorbis": ".ogg", "pcm_s16le": ".wav",
     "pcm_s24le": ".wav", "pcm_s32le": ".wav",
     "truehd": ".thd",
