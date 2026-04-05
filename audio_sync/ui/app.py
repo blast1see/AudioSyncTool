@@ -36,7 +36,7 @@ from audio_sync.config import (
     resolve_tool,
 )
 from audio_sync.core.analyzer import AudioAnalyzer
-from audio_sync.core.deew_encoder import DeewEncoder, encode_wav_to_dolby
+from audio_sync.core.deew_encoder import DeewEncoder, encode_wav_with_deew
 from audio_sync.core.encoder import QaacEncoder
 from audio_sync.core.ffmpeg_wrapper import FFmpegWrapper
 from audio_sync.core.models import AnalysisResult, AudioInfo, OutputSampleRate, ProgressCallback
@@ -101,9 +101,9 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self.fps_enabled_var = tk.BooleanVar(value=False)
         self.fps_conversion_var = tk.StringVar(value=FpsConversion.FPS_25_TO_23976.display_name)
 
-        # Dolby encoding ayarları
+        # Deew encoding ayarları
         self.deew_enabled_var = tk.BooleanVar(value=False)
-        self.encoder_type_var = tk.StringVar(value=EncoderType.FFMPEG.cli_value)
+        self.encoder_type_var = tk.StringVar(value=EncoderType.FFMPEG.display_name)
         self.deew_format_var = tk.StringVar(value=DeewFormat.DDP.cli_value)
         self.deew_bitrate_var = tk.StringVar(value="")
         self.deew_downmix_var = tk.StringVar(value="auto")
@@ -506,8 +506,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._update_fps_ratio_label()
 
     def _build_deew_panel(self, parent: tk.Frame) -> None:
-        """Build Dolby encoding settings into the given parent frame."""
-        # DEE status indicator
+        """Build Deew encoding settings into the given parent frame."""
+        # Deew status indicator
         status_row = tk.Frame(parent, bg=THEME.card)
         status_row.pack(fill="x", padx=14, pady=(6, 4))
 
@@ -533,7 +533,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._enc_menu = tk.OptionMenu(
             enc_row,
             self.encoder_type_var,
-            *[e.cli_value for e in EncoderType],
+            *[e.display_name for e in EncoderType],
         )
         self._enc_menu.config(
             bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
@@ -634,11 +634,11 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         )
         self._br_menu.pack(side="right")
 
-        # DEE-only ayarlar
-        self._dee_only_frame = tk.Frame(self._deew_settings_frame, bg=THEME.card)
-        self._dee_only_frame.pack(fill="x")
+        # Deew-only ayarlar
+        self._deew_only_frame = tk.Frame(self._deew_settings_frame, bg=THEME.card)
+        self._deew_only_frame.pack(fill="x")
 
-        drc_row = tk.Frame(self._dee_only_frame, bg=THEME.card)
+        drc_row = tk.Frame(self._deew_only_frame, bg=THEME.card)
         drc_row.pack(fill="x", pady=(0, 6))
         self._drc_label = tk.Label(
             drc_row, text=t("drc_profile"), font=FONTS.small,
@@ -662,7 +662,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         )
         self._drc_menu.pack(side="right")
 
-        dn_row = tk.Frame(self._dee_only_frame, bg=THEME.card)
+        dn_row = tk.Frame(self._deew_only_frame, bg=THEME.card)
         dn_row.pack(fill="x", pady=(0, 6))
         self._dn_label = tk.Label(
             dn_row, text=t("dialnorm_label"), font=FONTS.small,
@@ -742,7 +742,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
 
         pipeline_options = [
             (EncodingPipeline.NONE.value, t("encoding_none")),
-            (EncodingPipeline.DOLBY.value, t("encoding_dolby")),
+            (EncodingPipeline.DEEW.value, t("encoding_deew")),
             (EncodingPipeline.FFMPEG.value, t("encoding_ffmpeg")),
             (EncodingPipeline.QAAC.value, t("encoding_qaac")),
         ]
@@ -965,9 +965,9 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         )
         self._qaac_no_delay_cb.pack(side="left")
 
-        # ── Dolby sub-panel ──
-        self._dolby_enc_frame = tk.Frame(card, bg=THEME.card)
-        self._build_deew_panel(self._dolby_enc_frame)
+        # ── Deew sub-panel ──
+        self._deew_enc_frame = tk.Frame(card, bg=THEME.card)
+        self._build_deew_panel(self._deew_enc_frame)
 
         # Bottom padding
         tk.Frame(card, bg=THEME.card, height=6).pack(fill="x")
@@ -983,7 +983,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         # Hide all sub-panels
         self._ffmpeg_enc_frame.pack_forget()
         self._qaac_enc_frame.pack_forget()
-        self._dolby_enc_frame.pack_forget()
+        self._deew_enc_frame.pack_forget()
 
         if value == EncodingPipeline.FFMPEG.value:
             self._ffmpeg_enc_frame.pack(fill="x", pady=(0, 4))
@@ -991,8 +991,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         elif value == EncodingPipeline.QAAC.value:
             self._qaac_enc_frame.pack(fill="x", pady=(0, 4))
             self._on_qaac_mode_change(self._qaac_mode_var.get())
-        elif value == EncodingPipeline.DOLBY.value:
-            self._dolby_enc_frame.pack(fill="x", pady=(0, 4))
+        elif value == EncodingPipeline.DEEW.value:
+            self._deew_enc_frame.pack(fill="x", pady=(0, 4))
 
         self.after(50, self._fit_to_content)
 
@@ -1172,7 +1172,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             ("ffmpeg", t("tool_path_ffmpeg")),
             ("ffprobe", t("tool_path_ffprobe")),
             ("qaac", t("tool_path_qaac")),
-            ("deew", t("tool_path_dee")),
+            ("deew", t("tool_path_deew")),
         ]
 
         path_vars: dict[str, tk.StringVar] = {}
@@ -1315,7 +1315,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._fps_note_lbl.config(text=t("fps_note"))
         self._update_fps_ratio_label()
 
-        # Dolby
+        # Deew
         self._enc_label.config(text=t("encoder_label"))
         self._fmt_label.config(text=t("format_label"))
         self._ch_label.config(text=t("channel_layout"))
@@ -1408,12 +1408,12 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         if conversion is not None:
             ratio = conversion.tempo_ratio
             atempo = 1.0 / ratio
-            if atempo > 1.0:
+            if atempo < 1.0:
                 direction = t("fps_slowdown")
-                pct = (atempo - 1.0) * 100.0
+                pct = (1.0 - atempo) * 100.0
             else:
                 direction = t("fps_speedup")
-                pct = (1.0 - atempo) * 100.0
+                pct = (atempo - 1.0) * 100.0
             self._fps_ratio_lbl.config(
                 text=f"  → oran: {ratio:.6f}  |  %{pct:.3f} {direction}",
             )
@@ -1430,14 +1430,14 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
     # ── Deew UI Yardımcıları ─────────────────────────────────────────────
 
     def _update_deew_status(self) -> None:
-        dee_ok = DeewEncoder.is_available()
-        if dee_ok:
-            self._deew_status_lbl.config(text=t("dee_ready"), fg="#4ade80")
+        deew_ok = DeewEncoder.is_available()
+        if deew_ok:
+            self._deew_status_lbl.config(text=t("deew_ready"), fg="#4ade80")
         else:
-            self._deew_status_lbl.config(text=t("dee_not_installed"), fg=THEME.accent2)
+            self._deew_status_lbl.config(text=t("deew_not_installed"), fg=THEME.accent2)
 
     def _on_deew_toggle(self) -> None:
-        """Legacy no-op — Dolby visibility is now controlled by the pipeline dropdown."""
+        """Legacy no-op — Deew visibility is now controlled by the pipeline dropdown."""
         pass
 
     def _on_encoder_type_change(self, *_args: object) -> None:
@@ -1447,27 +1447,27 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
     def _get_selected_encoder(self) -> EncoderType:
         enc_value = self.encoder_type_var.get()
         for e in EncoderType:
-            if e.cli_value == enc_value:
+            if e.display_name == enc_value or e.cli_value == enc_value:
                 return e
         return EncoderType.FFMPEG
 
     def _update_encoder_ui(self) -> None:
         encoder = self._get_selected_encoder()
-        is_dee = encoder == EncoderType.DEE
+        is_deew = encoder == EncoderType.DEEW
 
-        if is_dee:
-            self._dee_only_frame.pack(fill="x")
-            self._enc_desc_lbl.config(text=t("dee_desc"))
-            self._enc_note_lbl.config(text=t("dee_note"))
+        if is_deew:
+            self._deew_only_frame.pack(fill="x")
+            self._enc_desc_lbl.config(text=t("deew_desc"))
+            self._enc_note_lbl.config(text=t("deew_note"))
         else:
-            self._dee_only_frame.pack_forget()
+            self._deew_only_frame.pack_forget()
             self._enc_desc_lbl.config(text=t("ffmpeg_enc_desc"))
             self._enc_note_lbl.config(text=t("ffmpeg_enc_note"))
 
         self.after(50, self._fit_to_content)
 
     def _show_deew_settings(self, show: bool) -> None:
-        """Legacy no-op — Dolby settings are always visible when the sub-panel is shown."""
+        """Legacy no-op — Deew settings are always visible when the sub-panel is shown."""
         pass
 
     def _on_deew_format_change(self, *_args: object) -> None:
@@ -1928,10 +1928,10 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             self._reset_processing()
             return
 
-        deew_enabled = (self._encoding_pipeline_var.get() == EncodingPipeline.DOLBY.value)
+        deew_enabled = (self._encoding_pipeline_var.get() == EncodingPipeline.DEEW.value)
         encoder = self._get_selected_encoder()
 
-        if deew_enabled and encoder == EncoderType.DEE:
+        if deew_enabled and encoder == EncoderType.DEEW:
             try:
                 DeewEncoder.check_availability()
             except OSError as e:
@@ -2084,7 +2084,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
     ) -> None:
         """Arka plan thread'inde senkronizasyon işlemini yürütür."""
         fps_tmp_path: str | None = None
-        wav_out_path: str | None = None  # Dolby encoding ara WAV dosyası
+        wav_out_path: str | None = None  # Deew encoding ara WAV dosyası
         needs_encoding: bool = False
 
         try:
@@ -2173,14 +2173,14 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             )
             self._log(t("log_command", cmd=cmd_summary))
 
-            # 6. Dolby encoding (etkinse)
+            # 6. Deew encoding (etkinse)
             if deew_params is not None:
                 self._set_progress(70)
                 enc_type: EncoderType = deew_params["encoder"]
                 fmt: DeewFormat = deew_params["format"]
 
                 if enc_type == EncoderType.FFMPEG:
-                    self._log(t("log_ffmpeg_dolby_start"))
+                    self._log(t("log_ffmpeg_deew_start"))
 
                     ffmpeg_bitrate = deew_params["bitrate"]
                     if ffmpeg_bitrate is None:
@@ -2194,7 +2194,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                     if deew_params["downmix"] is not None:
                         ffmpeg_channels = deew_params["downmix"].channels
 
-                    self._log(t("log_dolby_info",
+                    self._log(t("log_deew_info",
                         fmt=fmt.display_name,
                         br=ffmpeg_bitrate,
                         ch=ffmpeg_channels or t("source_keep"),
@@ -2202,7 +2202,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                     ))
 
                     try:
-                        enc_summary = self._ffmpeg.encode_to_dolby(
+                        enc_summary = self._ffmpeg.encode_to_ac3_eac3(
                             input_wav=wav_out_path,
                             output_path=out_path,
                             fmt=fmt,
@@ -2211,7 +2211,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                         )
                         self._log(t("log_command", cmd=enc_summary))
                         self._set_progress(95)
-                        self._log(t("log_ffmpeg_dolby_done", name=os.path.basename(out_path)))
+                        self._log(t("log_ffmpeg_deew_done", name=os.path.basename(out_path)))
 
                         if deew_params["delete_wav"] and os.path.isfile(wav_out_path):
                             try:
@@ -2232,15 +2232,15 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                             ) from ffmpeg_err
                 else:
                     self._log(t("log_deew_start"))
-                    self._log(t("log_dolby_info",
+                    self._log(t("log_deew_info",
                         fmt=fmt.display_name,
                         br=deew_params['bitrate'] or t("default_bitrate"),
                         ch=deew_params['downmix'].display_name if deew_params['downmix'] else t("source_keep"),
-                        enc="DEE",
+                        enc="Deew",
                     ))
 
                     try:
-                        final_path = encode_wav_to_dolby(
+                        final_path = encode_wav_with_deew(
                             input_wav=wav_out_path,
                             final_output_path=out_path,
                             fmt=fmt,
@@ -2252,7 +2252,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                             progress_callback=self._log,
                         )
                         self._set_progress(95)
-                        self._log(t("log_deew_dolby_done", name=os.path.basename(final_path)))
+                        self._log(t("log_deew_done", name=os.path.basename(final_path)))
                     except Exception as deew_err:
                         self._log(t("log_deew_error", err=deew_err))
                         wav_fallback = str(Path(out_path).with_suffix(".wav"))
@@ -2265,7 +2265,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                                 f"Deew encoding failed and WAV file not found: {deew_err}"
                             ) from deew_err
 
-            # 6b. Encoding pipeline (FFmpeg/qaac/Native — when not using Dolby)
+            # 6b. Encoding pipeline (FFmpeg/qaac/Native — when not using Deew)
             if deew_params is None:
                 if pipeline == EncodingPipeline.FFMPEG.value:
                     self._log(t("encoding_started"))

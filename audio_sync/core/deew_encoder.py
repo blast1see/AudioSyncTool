@@ -1,4 +1,4 @@
-"""Deew (Dolby Encoding Engine Wrapper) entegrasyonu.
+"""Deew entegrasyonu.
 
 Bu modül senkronizasyon sonrası WAV dosyalarını AC3/EAC3 formatına
 dönüştürmek için deew aracını soyutlar.
@@ -118,8 +118,8 @@ class DeewEncoder:
                 "    https://github.com/pcroland/deew/releases\n"
                 "    and place it in the tools/ folder.\n"
                 "\n"
-                "  Note: Deew requires Dolby Encoding Engine (DEE).\n"
-                "    Make sure DEE is installed and configured."
+                "  Note:\n"
+                "    Make sure deew is installed and configured correctly."
             )
         return deew_path
 
@@ -296,7 +296,7 @@ class DeewEncoder:
         except subprocess.TimeoutExpired:
             raise RuntimeError(
                 "Deew encoding did not complete within 10 minutes. "
-                "The file may be too large or DEE configuration may be incorrect."
+                "The file may be too large or deew may not be configured correctly."
             )
         except FileNotFoundError:
             raise OSError(
@@ -313,7 +313,7 @@ class DeewEncoder:
         """Deew'in oluşturduğu çıktı dosyasını bulur.
 
         Deew, giriş dosyasının adını koruyarak uzantıyı değiştirir.
-        DEE bazen çıktıyı alt dizine, giriş dosyasının dizinine veya
+        Deew bazen çıktıyı alt dizine, giriş dosyasının dizinine veya
         farklı bir konuma yazabilir; ayrıca uzantı birincil (``.eac3``)
         yerine alternatif (``.ec3``) olabilir.  Bu yüzden birden fazla
         konum ve uzantı taranır.
@@ -336,7 +336,7 @@ class DeewEncoder:
 
         input_stem = Path(input_wav).stem
         input_dir = str(Path(input_wav).parent)
-        # DEE, .eac3 yerine .ec3 uzantısı kullanabilir — tüm olası uzantıları tara
+        # Deew, .eac3 yerine .ec3 uzantısı kullanabilir — tüm olası uzantıları tara
         all_exts = fmt.all_extensions  # ör. (".eac3", ".ec3")
         expected_output = os.path.join(output_dir, f"{input_stem}{fmt.extension}")
 
@@ -350,7 +350,7 @@ class DeewEncoder:
             if os.path.isfile(candidate):
                 return candidate
 
-        # 2. Giriş dosyasının dizininde kontrol — deew/DEE bazen çıktıyı
+        # 2. Giriş dosyasının dizininde kontrol — deew bazen çıktıyı
         #    -o parametresini yok sayarak giriş dosyasının yanına yazar
         if input_dir != output_dir:
             for ext in all_exts:
@@ -379,7 +379,7 @@ class DeewEncoder:
             except OSError:
                 pass
 
-        # 4. Alt dizinlerde rekürsif arama — DEE/deew bazen çıktıyı
+        # 4. Alt dizinlerde rekürsif arama — deew bazen çıktıyı
         #    alt klasöre (ör. output_dir/subfolder/) yazabilir
         for search_dir in search_dirs:
             for root, _dirs, files in os.walk(search_dir):
@@ -437,7 +437,7 @@ class DeewEncoder:
 # ── Yardımcı Fonksiyonlar ───────────────────────────────────────────────────
 
 
-def encode_wav_to_dolby(
+def encode_wav_with_deew(
     input_wav: str,
     final_output_path: str,
     fmt: DeewFormat = DeewFormat.DDP,
@@ -448,7 +448,7 @@ def encode_wav_to_dolby(
     delete_wav: bool = True,
     progress_callback: Callable[[str], None] | None = None,
 ) -> str:
-    """WAV dosyasını Dolby formatına dönüştürür ve istenen konuma taşır.
+    """WAV dosyasını Deew ile dönüştürür ve istenen konuma taşır.
 
     Bu fonksiyon tam pipeline'ı yönetir:
         1. Deew ile encoding

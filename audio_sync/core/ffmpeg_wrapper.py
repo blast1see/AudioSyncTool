@@ -232,13 +232,18 @@ class FFmpegWrapper:
         """
         cmd = [
             resolve_tool("ffmpeg"),
+            "-v", "error",
+            "-nostdin",
             "-y",
             "-i", input_path,
             "-map", f"0:{stream_index}",
             "-c", "copy",
             output_path,
         ]
-        result = self._run_command(cmd, timeout=self._config.ffmpeg_timeout_sec)
+        result = self._run_command(
+            cmd,
+            timeout=self._get_ffmpeg_timeout(input_path),
+        )
         if result.returncode != 0:
             stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
             raise RuntimeError(f"Audio stream extraction error:\n{stderr_tail}")
@@ -256,7 +261,10 @@ class FFmpegWrapper:
             RuntimeError: FFmpeg dönüşüm hatası.
         """
         cmd = [
-            resolve_tool("ffmpeg"), "-y",
+            resolve_tool("ffmpeg"),
+            "-v", "error",
+            "-nostdin",
+            "-y",
             "-i", src,
             "-ar", str(self._config.analysis_sample_rate),
             "-ac", "1",
@@ -264,7 +272,10 @@ class FFmpegWrapper:
             "-f", "wav",
             out_path,
         ]
-        result = self._run_command(cmd, timeout=self._config.ffmpeg_timeout_sec)
+        result = self._run_command(
+            cmd,
+            timeout=self._get_ffmpeg_timeout(src),
+        )
         if result.returncode != 0:
             stderr_tail = result.stderr[-400:] if result.stderr else "(stderr empty)"
             raise RuntimeError(f"Mono conversion error:\n{stderr_tail}")
@@ -301,7 +312,7 @@ class FFmpegWrapper:
         """
         ratio = conversion.tempo_ratio
 
-        # atempo filtresi: >1.0 sesi uzatır (yavaşlatır), <1.0 kısaltır (hızlandırır)
+        # atempo filtresi: <1.0 sesi uzatır (yavaşlatır), >1.0 kısaltır (hızlandırır)
         # FPS dönüşümünde kaynak FPS > hedef FPS ise ses uzamalı → atempo = 1/ratio
         # Kaynak FPS < hedef FPS ise ses kısalmalı → atempo = 1/ratio
         # Genel formül: atempo = 1 / ratio = target_fps / source_fps
@@ -312,7 +323,10 @@ class FFmpegWrapper:
         sample_rate = audio_info.sample_rate
 
         cmd = [
-            resolve_tool("ffmpeg"), "-y",
+            resolve_tool("ffmpeg"),
+            "-v", "error",
+            "-nostdin",
+            "-y",
             "-i", src,
             "-af", f"atempo={atempo_value:.15f}",
             "-ac", str(channels),
@@ -329,7 +343,10 @@ class FFmpegWrapper:
             f"bit: {audio_info.bits}  |  sr: {sample_rate} Hz"
         )
 
-        result = self._run_command(cmd, timeout=self._config.ffmpeg_timeout_sec)
+        result = self._run_command(
+            cmd,
+            timeout=self._get_ffmpeg_timeout(src),
+        )
         if result.returncode != 0:
             stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
             raise RuntimeError(f"FPS conversion error:\n{stderr_tail}")
@@ -402,7 +419,10 @@ class FFmpegWrapper:
                 src_orig, sync_orig, delay_ms, abs_ms, channels, pcm_codec, output_sr, out_path,
             )
 
-        result = self._run_command(cmd, timeout=self._config.ffmpeg_timeout_sec)
+        result = self._run_command(
+            cmd,
+            timeout=self._get_ffmpeg_timeout(src_orig, sync_orig),
+        )
         if result.returncode != 0:
             stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
             raise RuntimeError(f"FFmpeg synchronization error:\n{stderr_tail}")
@@ -431,7 +451,10 @@ class FFmpegWrapper:
             flt = f"[0:a]atrim=start={trim_sec:.6f},asetpts=PTS-STARTPTS[out]"
 
         cmd = [
-            resolve_tool("ffmpeg"), "-y",
+            resolve_tool("ffmpeg"),
+            "-v", "error",
+            "-nostdin",
+            "-y",
             "-i", sync,  # Yalnızca sync/hedef dosya
             "-filter_complex", flt,
             "-map", "[out]",
@@ -471,7 +494,10 @@ class FFmpegWrapper:
             flt = f"[0:a]atrim=start={trim_sec:.6f},asetpts=PTS-STARTPTS,aresample=async=1[out]"
 
         cmd = [
-            resolve_tool("ffmpeg"), "-y",
+            resolve_tool("ffmpeg"),
+            "-v", "error",
+            "-nostdin",
+            "-y",
             "-i", sync,  # Yalnızca sync/hedef dosya
             "-filter_complex", flt,
             "-map", "[out]",
@@ -504,28 +530,43 @@ class FFmpegWrapper:
         delay_sec = abs_ms / 1000.0
         delay_str = "|".join([f"{abs_ms:.3f}"] * channels)
 
-        # Küçük gecikmelerde atempo ile ince ayar (50 ms eşiği)
+        # Küçük gecikmelerde ilk bölüm üzerinde atempo ile ince ayar (50 ms eşiği)
         use_atempo_fine = abs_ms < 50.0 and abs_ms > 0.1
-        ratio: float = 1.0
+        atempo_value: float = 1.0
+        mode_detail = "copy"
 
         if abs_ms < 1.0:
             # İhmal edilebilir gecikme — sync'i olduğu gibi kopyala
             flt = "[0:a]acopy[out]"
+            mode_detail = "copy"
         elif use_atempo_fine:
-            # Küçük gecikme: atempo ile ince ayar
+            # Küçük gecikme: ilk 10 saniyede tempo ince ayarı ile farkı absorbe et
             window_sec = 10.0
-            ratio = 1.0 + (delay_sec / window_sec)
-            ratio = max(0.5, min(2.0, ratio))
-            flt = f"[0:a]atempo={ratio:.10f}[out]"
+            target_window = window_sec + delay_sec if delay_ms >= 0 else window_sec - delay_sec
+            atempo_value = window_sec / target_window
+            atempo_value = max(0.5, min(2.0, atempo_value))
+            flt = (
+                f"[0:a]asplit=2[head_src][tail_src];"
+                f"[head_src]atrim=end={window_sec:.6f},asetpts=PTS-STARTPTS,"
+                f"atempo={atempo_value:.10f}[head];"
+                f"[tail_src]atrim=start={window_sec:.6f},asetpts=PTS-STARTPTS[tail];"
+                f"[head][tail]concat=n=2:v=0:a=1[out]"
+            )
+            mode_detail = f"first-{window_sec:.1f}s atempo={atempo_value:.6f}"
         elif delay_ms >= 0:
             # Sync ses erkende → başına gecikme ekle
             flt = f"[0:a]adelay={delay_str}:all=1[out]"
+            mode_detail = f"adelay={abs_ms:.3f}ms"
         else:
             # Sync ses geçte → başından kırp
             flt = f"[0:a]atrim=start={delay_sec:.6f},asetpts=PTS-STARTPTS[out]"
+            mode_detail = f"atrim={delay_sec:.3f}s"
 
         cmd = [
-            resolve_tool("ffmpeg"), "-y",
+            resolve_tool("ffmpeg"),
+            "-v", "error",
+            "-nostdin",
+            "-y",
             "-i", sync,  # Yalnızca sync/hedef dosya
             "-filter_complex", flt,
             "-map", "[out]",
@@ -542,7 +583,6 @@ class FFmpegWrapper:
         ])
 
         resample_part = f"-ar {output_sr.rate} " if output_sr.needs_resample else ""
-        mode_detail = f"atempo={ratio:.6f}" if use_atempo_fine else f"atrim={delay_sec:.3f}s"
         summary = f"[atempo] {mode_detail} | {resample_part}-ac {channels} -acodec {pcm_codec} -rf64 auto"
         return cmd, summary
 
@@ -569,7 +609,10 @@ class FFmpegWrapper:
             flt = f"[0:a]atrim=start={delay_sec:.6f},asetpts=PTS-STARTPTS,{_rb}[out]"
 
         cmd = [
-            resolve_tool("ffmpeg"), "-y",
+            resolve_tool("ffmpeg"),
+            "-v", "error",
+            "-nostdin",
+            "-y",
             "-i", sync,  # Yalnızca sync/hedef dosya
             "-filter_complex", flt,
             "-map", "[out]",
@@ -612,7 +655,10 @@ class FFmpegWrapper:
             flt = f"[0:a]atrim=start={trim_sec:.6f},asetpts=PTS-STARTPTS[out]"
 
         cmd = [
-            resolve_tool("ffmpeg"), "-y",
+            resolve_tool("ffmpeg"),
+            "-v", "error",
+            "-nostdin",
+            "-y",
             "-i", sync,  # Yalnızca sync/hedef dosya
             "-filter_complex", flt,
             "-map", "[out]",
@@ -652,7 +698,10 @@ class FFmpegWrapper:
             flt = f"[0:a]atrim=start={trim_sec:.6f},asetpts=PTS-STARTPTS,aresample=async=1000[out]"
 
         cmd = [
-            resolve_tool("ffmpeg"), "-y",
+            resolve_tool("ffmpeg"),
+            "-v", "error",
+            "-nostdin",
+            "-y",
             "-i", sync,  # Yalnızca sync/hedef dosya
             "-filter_complex", flt,
             "-map", "[out]",
@@ -672,9 +721,9 @@ class FFmpegWrapper:
         summary = f"[asyncts] ffmpeg … {resample_part}-ac {channels} -acodec {pcm_codec} -rf64 auto"
         return cmd, summary
 
-    # ── FFmpeg Dolby Encoding ────────────────────────────────────────────
+    # ── FFmpeg AC3/EAC3 Encoding ────────────────────────────────────────
 
-    def encode_to_dolby(
+    def encode_to_ac3_eac3(
         self,
         input_wav: str,
         output_path: str,
@@ -701,7 +750,10 @@ class FFmpegWrapper:
         codec = "ac3" if fmt == DeewFormat.DD else "eac3"
 
         cmd = [
-            resolve_tool("ffmpeg"), "-y",
+            resolve_tool("ffmpeg"),
+            "-v", "error",
+            "-nostdin",
+            "-y",
             "-i", input_wav,
             "-acodec", codec,
             "-b:a", f"{bitrate}k",
@@ -718,10 +770,13 @@ class FFmpegWrapper:
             f" → {os.path.basename(output_path)}"
         )
 
-        result = self._run_command(cmd, timeout=self._config.ffmpeg_timeout_sec)
+        result = self._run_command(
+            cmd,
+            timeout=self._get_ffmpeg_timeout(input_wav),
+        )
         if result.returncode != 0:
             stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
-            raise RuntimeError(f"FFmpeg Dolby encoding error:\n{stderr_tail}")
+            raise RuntimeError(f"FFmpeg AC3/EAC3 encoding error:\n{stderr_tail}")
 
         return cmd_summary
 
@@ -749,7 +804,10 @@ class FFmpegWrapper:
             RuntimeError: If encoding fails
         """
         cmd = [
-            resolve_tool("ffmpeg"), "-y",
+            resolve_tool("ffmpeg"),
+            "-v", "error",
+            "-nostdin",
+            "-y",
             "-i", input_path,
             "-c:a", "aac",
             "-b:a", f"{bitrate}k",
@@ -758,7 +816,10 @@ class FFmpegWrapper:
             cmd.extend(["-ac", str(channels)])
         cmd.append(output_path)
 
-        result = self._run_command(cmd, timeout=self._config.ffmpeg_timeout_sec)
+        result = self._run_command(
+            cmd,
+            timeout=self._get_ffmpeg_timeout(input_path),
+        )
         if result.returncode != 0:
             stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
             raise RuntimeError(f"FFmpeg AAC encoding error:\n{stderr_tail}")
@@ -790,7 +851,10 @@ class FFmpegWrapper:
         """
         compression = max(0, min(12, compression))
         cmd = [
-            resolve_tool("ffmpeg"), "-y",
+            resolve_tool("ffmpeg"),
+            "-v", "error",
+            "-nostdin",
+            "-y",
             "-i", input_path,
             "-c:a", "flac",
             "-compression_level", str(compression),
@@ -806,7 +870,10 @@ class FFmpegWrapper:
 
         cmd.append(output_path)
 
-        result = self._run_command(cmd, timeout=self._config.ffmpeg_timeout_sec)
+        result = self._run_command(
+            cmd,
+            timeout=self._get_ffmpeg_timeout(input_path),
+        )
         if result.returncode != 0:
             stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
             raise RuntimeError(f"FFmpeg FLAC encoding error:\n{stderr_tail}")
@@ -835,7 +902,10 @@ class FFmpegWrapper:
             RuntimeError: If encoding fails
         """
         cmd = [
-            resolve_tool("ffmpeg"), "-y",
+            resolve_tool("ffmpeg"),
+            "-v", "error",
+            "-nostdin",
+            "-y",
             "-i", input_path,
             "-c:a", "libopus",
             "-b:a", f"{bitrate}k",
@@ -844,7 +914,10 @@ class FFmpegWrapper:
             cmd.extend(["-ac", str(channels)])
         cmd.append(output_path)
 
-        result = self._run_command(cmd, timeout=self._config.ffmpeg_timeout_sec)
+        result = self._run_command(
+            cmd,
+            timeout=self._get_ffmpeg_timeout(input_path),
+        )
         if result.returncode != 0:
             stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
             raise RuntimeError(f"FFmpeg Opus encoding error:\n{stderr_tail}")
@@ -887,6 +960,35 @@ class FFmpegWrapper:
             raise OSError(
                 f"'{cmd[0]}' not found. Make sure FFmpeg is in your PATH."
             )
+
+    def _get_ffmpeg_timeout(self, *input_paths: str) -> int:
+        """Scale FFmpeg timeout for large or slow-to-decode audio inputs."""
+        timeout = self._config.ffmpeg_timeout_sec
+        complex_exts = {
+            ".thd", ".dtshd", ".dts", ".mka",
+            ".mkv", ".mp4", ".m4v", ".webm", ".ts", ".mts",
+        }
+
+        extra_sec = 0
+        for path in input_paths:
+            if not path:
+                continue
+
+            ext = os.path.splitext(path)[1].lower()
+            if ext in complex_exts:
+                extra_sec += self._config.ffmpeg_complex_format_bonus_sec
+
+            try:
+                size_gib = os.path.getsize(path) / (1024 ** 3)
+            except OSError:
+                continue
+
+            extra_sec += int(size_gib * self._config.ffmpeg_timeout_per_gib_sec)
+
+        return min(
+            self._config.ffmpeg_max_timeout_sec,
+            max(timeout, timeout + extra_sec),
+        )
 
     @staticmethod
     def _parse_ffprobe_output(stdout: str) -> dict[str, str]:
