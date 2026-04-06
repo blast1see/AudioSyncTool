@@ -505,6 +505,8 @@ class FFmpegOutputFormat(enum.Enum):
     AAC = ("aac", ".m4a", "AAC (FFmpeg)")
     FLAC = ("flac", ".flac", "FLAC (FFmpeg)")
     OPUS = ("libopus", ".opus", "Opus (FFmpeg)")
+    AC3 = ("ac3", ".ac3", "AC3 (FFmpeg)")
+    EAC3 = ("eac3", ".eac3", "E-AC3 (FFmpeg)")
 
     def __init__(self, codec: str, ext: str, label: str) -> None:
         self.codec = codec
@@ -520,6 +522,8 @@ class FFmpegEncodeConfig:
     flac_compression: int = 5       # 0-12 for FLAC
     flac_bit_depth: int = 24        # 16 or 24
     opus_bitrate: int = 128         # kbps for Opus
+    ac3_bitrate: int = FFMPEG_AC3_DEFAULT_BITRATE
+    eac3_bitrate: int = FFMPEG_EAC3_DEFAULT_BITRATE
 
 
 class QaacMode(enum.Enum):

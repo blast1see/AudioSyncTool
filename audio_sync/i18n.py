@@ -584,8 +584,8 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Deew (DD/DDP)",
     },
     "encoding_ffmpeg": {
-        "tr": "FFmpeg (AAC/FLAC/Opus)",
-        "en": "FFmpeg (AAC/FLAC/Opus)",
+        "tr": "FFmpeg (AAC/FLAC/Opus/AC3/EAC3)",
+        "en": "FFmpeg (AAC/FLAC/Opus/AC3/EAC3)",
     },
     "encoding_qaac": {
         "tr": "qaac (AAC/M4A)",
@@ -647,6 +647,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "Opus (FFmpeg)",
         "en": "Opus (FFmpeg)",
     },
+    "ffmpeg_ac3_label": {
+        "tr": "AC3 (FFmpeg)",
+        "en": "AC3 (FFmpeg)",
+    },
+    "ffmpeg_eac3_label": {
+        "tr": "E-AC3 (FFmpeg)",
+        "en": "E-AC3 (FFmpeg)",
+    },
     "qaac_tvbr_label": {
         "tr": "True VBR (TVBR)",
         "en": "True VBR (TVBR)",
@@ -678,6 +686,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "opus_bitrate_label": {
         "tr": "Opus Bitrate (kbps)",
         "en": "Opus Bitrate (kbps)",
+    },
+    "ac3_bitrate_label": {
+        "tr": "AC3 Bitrate (kbps)",
+        "en": "AC3 Bitrate (kbps)",
+    },
+    "eac3_bitrate_label": {
+        "tr": "E-AC3 Bitrate (kbps)",
+        "en": "E-AC3 Bitrate (kbps)",
     },
     "qaac_quality_label": {
         "tr": "TVBR Kalite (0-127)",

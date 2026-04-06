@@ -20,14 +20,12 @@ from audio_sync.config import (
     DEEW_COMMON_BITRATES, DEEW_DEFAULT_BITRATES,
     get_deew_bitrate_key,
     FpsConversion,
-    EncoderType,
     FFMPEG_AC3_BITRATES, FFMPEG_EAC3_BITRATES,
     FFMPEG_AC3_DEFAULT_BITRATE, FFMPEG_EAC3_DEFAULT_BITRATE,
     CONTAINER_EXTENSIONS,
     CODEC_EXTENSION_MAP,
     EncodingPipeline,
     FFmpegOutputFormat,
-    FFmpegEncodeConfig,
     QaacMode,
     QaacConfig,
     ToolPaths,
@@ -102,8 +100,6 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self.fps_conversion_var = tk.StringVar(value=FpsConversion.FPS_25_TO_23976.display_name)
 
         # Deew encoding ayarları
-        self.deew_enabled_var = tk.BooleanVar(value=False)
-        self.encoder_type_var = tk.StringVar(value=EncoderType.FFMPEG.display_name)
         self.deew_format_var = tk.StringVar(value=DeewFormat.DDP.cli_value)
         self.deew_bitrate_var = tk.StringVar(value="")
         self.deew_downmix_var = tk.StringVar(value="auto")
@@ -120,6 +116,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._ffmpeg_flac_compression_var = tk.StringVar(value="5")
         self._ffmpeg_flac_bit_depth_var = tk.StringVar(value="24")
         self._ffmpeg_opus_bitrate_var = tk.StringVar(value="128")
+        self._ffmpeg_ac3eac3_bitrate_var = tk.StringVar(value=str(FFMPEG_AC3_DEFAULT_BITRATE))
+        self._ffmpeg_downmix_var = tk.StringVar(value="auto")
 
         # qaac encoding
         self._qaac_mode_var = tk.StringVar(value=QaacMode.TVBR.flag)
@@ -522,32 +520,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._deew_settings_frame.pack(fill="x", padx=14, pady=(0, 10))
 
         # Encoder seçimi
-        enc_row = tk.Frame(self._deew_settings_frame, bg=THEME.card)
-        enc_row.pack(fill="x", pady=(0, 6))
-        self._enc_label = tk.Label(
-            enc_row, text=t("encoder_label"), font=FONTS.small,
-            fg=THEME.text, bg=THEME.card,
-        )
-        self._enc_label.pack(side="left")
-
-        self._enc_menu = tk.OptionMenu(
-            enc_row,
-            self.encoder_type_var,
-            *[e.display_name for e in EncoderType],
-        )
-        self._enc_menu.config(
-            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
-            activebackground=THEME.card, activeforeground=THEME.text,
-            highlightthickness=0, relief="flat", width=12,
-        )
-        self._enc_menu["menu"].config(
-            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
-            activebackground=THEME.accent, activeforeground=THEME.bg,
-        )
-        self._enc_menu.pack(side="right")
-
         self._enc_desc_lbl = tk.Label(
-            self._deew_settings_frame, text="", font=FONTS.small,
+            self._deew_settings_frame, text=t("deew_desc"), font=FONTS.small,
             fg=THEME.muted, bg=THEME.card, anchor="w",
         )
         self._enc_desc_lbl.pack(fill="x", pady=(0, 6))
@@ -695,7 +669,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
 
         self._enc_note_lbl = tk.Label(
             self._deew_settings_frame,
-            text="",
+            text=t("deew_note"),
             font=FONTS.small,
             fg=THEME.muted,
             bg=THEME.card,
@@ -707,12 +681,10 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         # Değişiklik izleyicileri
         self.deew_format_var.trace_add("write", self._on_deew_format_change)
         self.deew_downmix_var.trace_add("write", self._on_deew_channel_change)
-        self.encoder_type_var.trace_add("write", self._on_encoder_type_change)
 
         self._update_channel_options()
         self._update_bitrate_options()
         self._update_format_description()
-        self._update_encoder_ui()
 
     def _build_encoding_panel(self) -> None:
         """Build the unified encoding pipeline panel."""
@@ -780,6 +752,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             (FFmpegOutputFormat.AAC.codec, t("ffmpeg_aac_label")),
             (FFmpegOutputFormat.FLAC.codec, t("ffmpeg_flac_label")),
             (FFmpegOutputFormat.OPUS.codec, t("ffmpeg_opus_label")),
+            (FFmpegOutputFormat.AC3.codec, t("ffmpeg_ac3_label")),
+            (FFmpegOutputFormat.EAC3.codec, t("ffmpeg_eac3_label")),
         ]
 
         self._ffmpeg_format_menu = tk.OptionMenu(
@@ -857,6 +831,48 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             width=8, bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
             insertbackground=THEME.text, relief="flat",
         ).pack(side="left")
+
+        # FFmpeg AC3/EAC3 bitrate
+        self._ffmpeg_lossy_frame = tk.Frame(self._ffmpeg_enc_frame, bg=THEME.card)
+        self._ffmpeg_lossy_bitrate_lbl = tk.Label(
+            self._ffmpeg_lossy_frame, text=t("ac3_bitrate_label"), font=FONTS.small,
+            fg=THEME.text, bg=THEME.card,
+        )
+        self._ffmpeg_lossy_bitrate_lbl.pack(side="left", padx=(0, 8))
+        self._ffmpeg_lossy_bitrate_menu = tk.OptionMenu(
+            self._ffmpeg_lossy_frame,
+            self._ffmpeg_ac3eac3_bitrate_var,
+            str(FFMPEG_AC3_DEFAULT_BITRATE),
+        )
+        self._ffmpeg_lossy_bitrate_menu.config(
+            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+            highlightthickness=0, relief="flat",
+        )
+        self._ffmpeg_lossy_bitrate_menu["menu"].config(
+            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+        )
+        self._ffmpeg_lossy_bitrate_menu.pack(side="left")
+
+        # FFmpeg AC3/EAC3 channel layout
+        self._ffmpeg_channel_frame = tk.Frame(self._ffmpeg_enc_frame, bg=THEME.card)
+        self._ffmpeg_channel_lbl = tk.Label(
+            self._ffmpeg_channel_frame, text=t("channel_layout"), font=FONTS.small,
+            fg=THEME.text, bg=THEME.card,
+        )
+        self._ffmpeg_channel_lbl.pack(side="left", padx=(0, 8))
+        self._ffmpeg_channel_menu = tk.OptionMenu(
+            self._ffmpeg_channel_frame,
+            self._ffmpeg_downmix_var,
+            "auto",
+        )
+        self._ffmpeg_channel_menu.config(
+            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+            highlightthickness=0, relief="flat",
+        )
+        self._ffmpeg_channel_menu["menu"].config(
+            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+        )
+        self._ffmpeg_channel_menu.pack(side="left")
 
         # ── qaac sub-panel ──
         self._qaac_enc_frame = tk.Frame(card, bg=THEME.card)
@@ -1002,6 +1018,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._ffmpeg_flac_frame.pack_forget()
         self._ffmpeg_flac_bd_frame.pack_forget()
         self._ffmpeg_opus_frame.pack_forget()
+        self._ffmpeg_lossy_frame.pack_forget()
+        self._ffmpeg_channel_frame.pack_forget()
 
         if value == FFmpegOutputFormat.AAC.codec:
             self._ffmpeg_aac_frame.pack(fill="x", padx=14, pady=(0, 4))
@@ -1010,6 +1028,10 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             self._ffmpeg_flac_bd_frame.pack(fill="x", padx=14, pady=(0, 4))
         elif value == FFmpegOutputFormat.OPUS.codec:
             self._ffmpeg_opus_frame.pack(fill="x", padx=14, pady=(0, 4))
+        elif value in (FFmpegOutputFormat.AC3.codec, FFmpegOutputFormat.EAC3.codec):
+            self._update_ffmpeg_lossy_options()
+            self._ffmpeg_lossy_frame.pack(fill="x", padx=14, pady=(0, 4))
+            self._ffmpeg_channel_frame.pack(fill="x", padx=14, pady=(0, 4))
 
         self.after(50, self._fit_to_content)
 
@@ -1316,15 +1338,17 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._update_fps_ratio_label()
 
         # Deew
-        self._enc_label.config(text=t("encoder_label"))
+        self._enc_desc_lbl.config(text=t("deew_desc"))
         self._fmt_label.config(text=t("format_label"))
         self._ch_label.config(text=t("channel_layout"))
         self._br_label.config(text=t("bitrate_label"))
         self._drc_label.config(text=t("drc_profile"))
         self._dn_label.config(text=t("dialnorm_label"))
         self._delete_wav_cb.config(text=t("delete_intermediate_wav"))
+        self._enc_note_lbl.config(text=t("deew_note"))
         self._update_deew_status()
-        self._update_encoder_ui()
+        self._update_bitrate_options()
+        self._update_format_description()
 
         # Encoding panel
         self._encoding_title_lbl.config(text=t("encoding_pipeline"))
@@ -1333,6 +1357,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._ffmpeg_aac_bitrate_lbl.config(text=t("aac_bitrate_label"))
         self._ffmpeg_flac_compression_lbl.config(text=t("ffmpeg_flac_compression_label"))
         self._ffmpeg_opus_bitrate_lbl.config(text=t("opus_bitrate_label"))
+        self._ffmpeg_channel_lbl.config(text=t("channel_layout"))
         self._qaac_mode_lbl.config(text=t("encoding_mode"))
         self._qaac_tvbr_quality_lbl.config(text=t("qaac_quality_label"))
         self._qaac_cvbr_bitrate_lbl.config(text=t("encoding_bitrate"))
@@ -1341,6 +1366,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._qaac_he_aac_cb.config(text=t("encoding_he_aac"))
         self._qaac_no_delay_cb.config(text=t("encoding_no_delay"))
         self._ffmpeg_flac_bd_lbl.config(text=t("flac_bit_depth_label"))
+        self._on_ffmpeg_format_change(self._ffmpeg_format_var.get())
 
         # Tool paths button
         self._tool_paths_btn.config(text=t("tool_paths_button"))
@@ -1440,32 +1466,6 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         """Legacy no-op — Deew visibility is now controlled by the pipeline dropdown."""
         pass
 
-    def _on_encoder_type_change(self, *_args: object) -> None:
-        self._update_encoder_ui()
-        self._update_bitrate_options()
-
-    def _get_selected_encoder(self) -> EncoderType:
-        enc_value = self.encoder_type_var.get()
-        for e in EncoderType:
-            if e.display_name == enc_value or e.cli_value == enc_value:
-                return e
-        return EncoderType.FFMPEG
-
-    def _update_encoder_ui(self) -> None:
-        encoder = self._get_selected_encoder()
-        is_deew = encoder == EncoderType.DEEW
-
-        if is_deew:
-            self._deew_only_frame.pack(fill="x")
-            self._enc_desc_lbl.config(text=t("deew_desc"))
-            self._enc_note_lbl.config(text=t("deew_note"))
-        else:
-            self._deew_only_frame.pack_forget()
-            self._enc_desc_lbl.config(text=t("ffmpeg_enc_desc"))
-            self._enc_note_lbl.config(text=t("ffmpeg_enc_note"))
-
-        self.after(50, self._fit_to_content)
-
     def _show_deew_settings(self, show: bool) -> None:
         """Legacy no-op — Deew settings are always visible when the sub-panel is shown."""
         pass
@@ -1509,20 +1509,10 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
 
     def _update_bitrate_options(self) -> None:
         fmt = self._get_selected_format()
-        encoder = self._get_selected_encoder()
-
-        if encoder == EncoderType.FFMPEG:
-            if fmt == DeewFormat.DD:
-                bitrates = FFMPEG_AC3_BITRATES
-                default_br = FFMPEG_AC3_DEFAULT_BITRATE
-            else:
-                bitrates = FFMPEG_EAC3_BITRATES
-                default_br = FFMPEG_EAC3_DEFAULT_BITRATE
-        else:
-            downmix = self._get_selected_downmix()
-            key = get_deew_bitrate_key(fmt, downmix)
-            bitrates = DEEW_COMMON_BITRATES.get(key, [256, 384, 448, 640])
-            default_br = DEEW_DEFAULT_BITRATES.get(key, 448)
+        downmix = self._get_selected_downmix()
+        key = get_deew_bitrate_key(fmt, downmix)
+        bitrates = DEEW_COMMON_BITRATES.get(key, [256, 384, 448, 640])
+        default_br = DEEW_DEFAULT_BITRATES.get(key, 448)
 
         menu = self._br_menu["menu"]
         menu.delete(0, "end")
@@ -1544,6 +1534,62 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         if current and current.isdigit() and int(current) not in bitrates:
             self.deew_bitrate_var.set("")
 
+    def _get_selected_ffmpeg_format(self) -> FFmpegOutputFormat:
+        fmt_value = self._ffmpeg_format_var.get()
+        for fmt in FFmpegOutputFormat:
+            if fmt.codec == fmt_value:
+                return fmt
+        return FFmpegOutputFormat.AAC
+
+    def _parse_downmix_value(self, value: str) -> DeewDownmix | None:
+        if value == "auto":
+            return None
+        for dm in DeewDownmix:
+            if dm.display_name == value:
+                return dm
+        return None
+
+    def _update_ffmpeg_lossy_options(self) -> None:
+        fmt = self._get_selected_ffmpeg_format()
+        is_eac3 = fmt == FFmpegOutputFormat.EAC3
+        bitrates = FFMPEG_EAC3_BITRATES if is_eac3 else FFMPEG_AC3_BITRATES
+        default_br = FFMPEG_EAC3_DEFAULT_BITRATE if is_eac3 else FFMPEG_AC3_DEFAULT_BITRATE
+
+        self._ffmpeg_lossy_bitrate_lbl.config(
+            text=t("eac3_bitrate_label") if is_eac3 else t("ac3_bitrate_label"),
+        )
+
+        menu = self._ffmpeg_lossy_bitrate_menu["menu"]
+        menu.delete(0, "end")
+        for br in bitrates:
+            menu.add_command(
+                label=f"{br} kbps",
+                command=lambda b=br: self._ffmpeg_ac3eac3_bitrate_var.set(str(b)),
+            )
+
+        current = self._ffmpeg_ac3eac3_bitrate_var.get()
+        if not current.isdigit() or int(current) not in bitrates:
+            self._ffmpeg_ac3eac3_bitrate_var.set(str(default_br))
+
+        channel_menu = self._ffmpeg_channel_menu["menu"]
+        channel_menu.delete(0, "end")
+
+        options = ["auto"]
+        for dm in DeewDownmix:
+            if fmt == FFmpegOutputFormat.AC3 and dm == DeewDownmix.SURROUND_71:
+                continue
+            options.append(dm.display_name)
+
+        for opt in options:
+            channel_menu.add_command(
+                label=opt,
+                command=lambda v=opt: self._ffmpeg_downmix_var.set(v),
+            )
+
+        current_downmix = self._ffmpeg_downmix_var.get()
+        if current_downmix not in options:
+            self._ffmpeg_downmix_var.set("auto")
+
     def _get_selected_format(self) -> DeewFormat:
         fmt_value = self.deew_format_var.get()
         for f in DeewFormat:
@@ -1552,13 +1598,10 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         return DeewFormat.DDP
 
     def _get_selected_downmix(self) -> DeewDownmix | None:
-        dm_value = self.deew_downmix_var.get()
-        if dm_value == "auto":
-            return None
-        for dm in DeewDownmix:
-            if dm.display_name == dm_value:
-                return dm
-        return None
+        return self._parse_downmix_value(self.deew_downmix_var.get())
+
+    def _get_selected_ffmpeg_downmix(self) -> DeewDownmix | None:
+        return self._parse_downmix_value(self._ffmpeg_downmix_var.get())
 
     def _get_selected_drc(self) -> DeewDRC:
         drc_value = self.deew_drc_var.get()
@@ -1929,9 +1972,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             return
 
         deew_enabled = (self._encoding_pipeline_var.get() == EncodingPipeline.DEEW.value)
-        encoder = self._get_selected_encoder()
 
-        if deew_enabled and encoder == EncoderType.DEEW:
+        if deew_enabled:
             try:
                 DeewEncoder.check_availability()
             except OSError as e:
@@ -1941,6 +1983,13 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
 
         # Encoding pipeline availability checks
         pipeline = self._encoding_pipeline_var.get()
+        ffmpeg_format = self._get_selected_ffmpeg_format()
+        ffmpeg_lossy_default = (
+            FFMPEG_EAC3_DEFAULT_BITRATE
+            if ffmpeg_format == FFmpegOutputFormat.EAC3
+            else FFMPEG_AC3_DEFAULT_BITRATE
+        )
+        ffmpeg_downmix = self._get_selected_ffmpeg_downmix()
 
         if pipeline == EncodingPipeline.QAAC.value:
             ok, msg = QaacEncoder.check_availability()
@@ -1960,7 +2009,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         # ── Capture encoding params on main thread (thread-safe) ──
         encoding_params: dict = {
             "pipeline": pipeline,
-            "ffmpeg_format": self._ffmpeg_format_var.get(),
+            "ffmpeg_format": ffmpeg_format.codec,
             "ffmpeg_aac_bitrate": parse_int(
                 self._ffmpeg_aac_bitrate_var.get(), default=256, minimum=32, maximum=512,
             ),
@@ -1973,6 +2022,13 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             "ffmpeg_opus_bitrate": parse_int(
                 self._ffmpeg_opus_bitrate_var.get(), default=128, minimum=6, maximum=512,
             ),
+            "ffmpeg_ac3eac3_bitrate": parse_int(
+                self._ffmpeg_ac3eac3_bitrate_var.get(),
+                default=ffmpeg_lossy_default,
+                minimum=64,
+                maximum=1024,
+            ),
+            "ffmpeg_downmix_channels": ffmpeg_downmix.channels if ffmpeg_downmix else None,
             "qaac_mode": self._qaac_mode_var.get(),
             "qaac_tvbr_quality": parse_int(
                 self._qaac_tvbr_quality_var.get(), default=91, minimum=0, maximum=127,
@@ -1996,16 +2052,21 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             ext_label = fmt.display_name
             filetypes = [(ext_label, f"*{ext}"), ("WAV", "*.wav")]
         elif pipeline == EncodingPipeline.FFMPEG.value:
-            fmt_codec = self._ffmpeg_format_var.get()
-            if fmt_codec == FFmpegOutputFormat.AAC.codec:
+            if ffmpeg_format == FFmpegOutputFormat.AAC:
                 ext = ".m4a"
                 filetypes = [("AAC/M4A", "*.m4a"), ("WAV", "*.wav")]
-            elif fmt_codec == FFmpegOutputFormat.FLAC.codec:
+            elif ffmpeg_format == FFmpegOutputFormat.FLAC:
                 ext = ".flac"
                 filetypes = [("FLAC", "*.flac"), ("WAV", "*.wav")]
-            elif fmt_codec == FFmpegOutputFormat.OPUS.codec:
+            elif ffmpeg_format == FFmpegOutputFormat.OPUS:
                 ext = ".opus"
                 filetypes = [("Opus", "*.opus"), ("WAV", "*.wav")]
+            elif ffmpeg_format == FFmpegOutputFormat.AC3:
+                ext = ".ac3"
+                filetypes = [("AC3", "*.ac3"), ("WAV", "*.wav")]
+            elif ffmpeg_format == FFmpegOutputFormat.EAC3:
+                ext = ".eac3"
+                filetypes = [("E-AC3", "*.eac3"), ("EC3", "*.ec3"), ("WAV", "*.wav")]
             else:
                 ext = ".wav"
                 filetypes = [("WAV", "*.wav")]
@@ -2038,7 +2099,6 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         deew_params: dict | None = None
         if deew_enabled:
             deew_params = {
-                "encoder": encoder,
                 "format": self._get_selected_format(),
                 "bitrate": self._get_deew_bitrate(),
                 "downmix": self._get_selected_downmix(),
@@ -2176,100 +2236,47 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             # 6. Deew encoding (etkinse)
             if deew_params is not None:
                 self._set_progress(70)
-                enc_type: EncoderType = deew_params["encoder"]
                 fmt: DeewFormat = deew_params["format"]
+                self._log(t("log_deew_start"))
+                self._log(t("log_deew_info",
+                    fmt=fmt.display_name,
+                    br=deew_params['bitrate'] or t("default_bitrate"),
+                    ch=deew_params['downmix'].display_name if deew_params['downmix'] else t("source_keep"),
+                    enc="Deew",
+                ))
 
-                if enc_type == EncoderType.FFMPEG:
-                    self._log(t("log_ffmpeg_deew_start"))
-
-                    ffmpeg_bitrate = deew_params["bitrate"]
-                    if ffmpeg_bitrate is None:
-                        from audio_sync.config import (
-                            FFMPEG_AC3_DEFAULT_BITRATE as _ac3_def,
-                            FFMPEG_EAC3_DEFAULT_BITRATE as _eac3_def,
-                        )
-                        ffmpeg_bitrate = _ac3_def if fmt == DeewFormat.DD else _eac3_def
-
-                    ffmpeg_channels: int | None = None
-                    if deew_params["downmix"] is not None:
-                        ffmpeg_channels = deew_params["downmix"].channels
-
-                    self._log(t("log_deew_info",
-                        fmt=fmt.display_name,
-                        br=ffmpeg_bitrate,
-                        ch=ffmpeg_channels or t("source_keep"),
-                        enc="FFmpeg",
-                    ))
-
-                    try:
-                        enc_summary = self._ffmpeg.encode_to_ac3_eac3(
-                            input_wav=wav_out_path,
-                            output_path=out_path,
-                            fmt=fmt,
-                            bitrate=ffmpeg_bitrate,
-                            channels=ffmpeg_channels,
-                        )
-                        self._log(t("log_command", cmd=enc_summary))
-                        self._set_progress(95)
-                        self._log(t("log_ffmpeg_deew_done", name=os.path.basename(out_path)))
-
-                        if deew_params["delete_wav"] and os.path.isfile(wav_out_path):
-                            try:
-                                os.remove(wav_out_path)
-                                self._log(t("log_intermediate_wav_deleted"))
-                            except OSError:
-                                self._log(t("log_intermediate_wav_delete_fail"))
-                    except Exception as ffmpeg_err:
-                        self._log(t("log_ffmpeg_enc_error", err=ffmpeg_err))
-                        wav_fallback = str(Path(out_path).with_suffix(".wav"))
-                        if os.path.isfile(wav_out_path):
-                            shutil.move(wav_out_path, wav_fallback)
-                            self._log(t("log_wav_preserved", name=os.path.basename(wav_fallback)))
-                            out_path = wav_fallback
-                        else:
-                            raise RuntimeError(
-                                f"FFmpeg encoding failed and WAV file not found: {ffmpeg_err}"
-                            ) from ffmpeg_err
-                else:
-                    self._log(t("log_deew_start"))
-                    self._log(t("log_deew_info",
-                        fmt=fmt.display_name,
-                        br=deew_params['bitrate'] or t("default_bitrate"),
-                        ch=deew_params['downmix'].display_name if deew_params['downmix'] else t("source_keep"),
-                        enc="Deew",
-                    ))
-
-                    try:
-                        final_path = encode_wav_with_deew(
-                            input_wav=wav_out_path,
-                            final_output_path=out_path,
-                            fmt=fmt,
-                            bitrate=deew_params["bitrate"],
-                            downmix=deew_params["downmix"],
-                            drc=deew_params["drc"],
-                            dialnorm=deew_params["dialnorm"],
-                            delete_wav=deew_params["delete_wav"],
-                            progress_callback=self._log,
-                        )
-                        self._set_progress(95)
-                        self._log(t("log_deew_done", name=os.path.basename(final_path)))
-                    except Exception as deew_err:
-                        self._log(t("log_deew_error", err=deew_err))
-                        wav_fallback = str(Path(out_path).with_suffix(".wav"))
-                        if os.path.isfile(wav_out_path):
-                            shutil.move(wav_out_path, wav_fallback)
-                            self._log(t("log_wav_preserved", name=os.path.basename(wav_fallback)))
-                            out_path = wav_fallback
-                        else:
-                            raise RuntimeError(
-                                f"Deew encoding failed and WAV file not found: {deew_err}"
-                            ) from deew_err
+                try:
+                    final_path = encode_wav_with_deew(
+                        input_wav=wav_out_path,
+                        final_output_path=out_path,
+                        fmt=fmt,
+                        bitrate=deew_params["bitrate"],
+                        downmix=deew_params["downmix"],
+                        drc=deew_params["drc"],
+                        dialnorm=deew_params["dialnorm"],
+                        delete_wav=deew_params["delete_wav"],
+                        progress_callback=self._log,
+                    )
+                    self._set_progress(95)
+                    self._log(t("log_deew_done", name=os.path.basename(final_path)))
+                except Exception as deew_err:
+                    self._log(t("log_deew_error", err=deew_err))
+                    wav_fallback = str(Path(out_path).with_suffix(".wav"))
+                    if os.path.isfile(wav_out_path):
+                        shutil.move(wav_out_path, wav_fallback)
+                        self._log(t("log_wav_preserved", name=os.path.basename(wav_fallback)))
+                        out_path = wav_fallback
+                    else:
+                        raise RuntimeError(
+                            f"Deew encoding failed and WAV file not found: {deew_err}"
+                        ) from deew_err
 
             # 6b. Encoding pipeline (FFmpeg/qaac/Native — when not using Deew)
             if deew_params is None:
                 if pipeline == EncodingPipeline.FFMPEG.value:
                     self._log(t("encoding_started"))
                     fmt_codec = enc.get("ffmpeg_format", FFmpegOutputFormat.AAC.codec)
+                    ffmpeg_channels = enc.get("ffmpeg_downmix_channels")
 
                     if fmt_codec == FFmpegOutputFormat.AAC.codec:
                         bitrate = enc.get("ffmpeg_aac_bitrate", 256)
@@ -2281,6 +2288,24 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                     elif fmt_codec == FFmpegOutputFormat.OPUS.codec:
                         bitrate = enc.get("ffmpeg_opus_bitrate", 128)
                         summary = self._ffmpeg.encode_to_opus(wav_out_path, out_path, bitrate=bitrate)
+                    elif fmt_codec == FFmpegOutputFormat.AC3.codec:
+                        bitrate = enc.get("ffmpeg_ac3eac3_bitrate", FFMPEG_AC3_DEFAULT_BITRATE)
+                        summary = self._ffmpeg.encode_to_ac3_eac3(
+                            wav_out_path,
+                            out_path,
+                            fmt=DeewFormat.DD,
+                            bitrate=bitrate,
+                            channels=ffmpeg_channels,
+                        )
+                    elif fmt_codec == FFmpegOutputFormat.EAC3.codec:
+                        bitrate = enc.get("ffmpeg_ac3eac3_bitrate", FFMPEG_EAC3_DEFAULT_BITRATE)
+                        summary = self._ffmpeg.encode_to_ac3_eac3(
+                            wav_out_path,
+                            out_path,
+                            fmt=DeewFormat.DDP,
+                            bitrate=bitrate,
+                            channels=ffmpeg_channels,
+                        )
                     else:
                         summary = ""
 
