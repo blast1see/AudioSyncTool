@@ -1,46 +1,44 @@
-# Audio Sync Tool v2.2.2
+# Audio Sync Tool v2.2.3
 
 ## What's New / Yenilikler
 
-### Synchronization fixes
-- Fixed the `atempo` mode for tiny offsets so small positive and negative delays now settle correctly
-- Corrected FPS slowdown/speedup indicator text to match the real conversion direction
-- Renamed sync modes so the UI now reflects the actual filters used by each mode
+### Encoding pipeline cleanup
+- Deew is now a Deew-only pipeline with no FFmpeg encoder switch inside that panel
+- AC3 and EAC3 output options were moved into the FFmpeg pipeline
+- FFmpeg AC3/EAC3 output now has bitrate and channel layout controls in the correct place
 
 ### Verification
-- All sync modes were smoke-tested with controlled offsets on Windows
-- FPS conversion outputs were checked against expected duration ratios
-- FFmpeg AC3/EAC3 output and Deew AC3/EAC3 output were both smoke-tested successfully
-- Direct `.thd` and `.dtshd` input decoding was verified with real sample files
+- UI smoke test confirmed the old Deew-side encoder selector is gone
+- UI smoke test confirmed AC3/EAC3 controls now appear under the FFmpeg pipeline
+- FFmpeg AC3 and EAC3 output creation was smoke-tested successfully after the refactor
 
-### Documentation and wording
-- Removed `Dolby` / `DEE` wording from app-facing text and repository docs
-- Updated README and changelog terminology to stay aligned with the current UI
+### Release contents
+- Updated Windows executable for v2.2.3
+- Refreshed changelog, release notes, and README release badge
 
 ---
 
 ## Turkce
 
-### Senkronizasyon duzeltmeleri
-- `atempo` modu kucuk ofsetlerde duzeltildi; artik kucuk pozitif ve negatif gecikmeler dogru sekilde sifirlaniyor
-- FPS yavaslatma/hizlandirma gosterge metni gercek donusum yonu ile uyumlu hale getirildi
-- Senkron mod adlari, UI'da kullanilan gercek filtrelerle uyumlu olacak sekilde guncellendi
+### Kodlama pipeline temizligi
+- Deew artik kendi panelinde yalnizca Deew kullanan bir pipeline; bu panelde FFmpeg encoder secimi kaldirildi
+- AC3 ve EAC3 cikti secenekleri FFmpeg pipeline altina tasindi
+- FFmpeg AC3/EAC3 ciktilarina dogru yerde bitrate ve kanal duzeni kontrolleri eklendi
 
 ### Dogrulama
-- Tum senkron modlari Windows uzerinde kontrollu ofsetlerle smoke testten gecirildi
-- FPS donusumu ciktilari beklenen sure oranlari ile karsilastirildi
-- FFmpeg AC3/EAC3 ciktilari ve Deew AC3/EAC3 ciktilari basariyla smoke test edildi
-- Gercek ornek dosyalarla dogrudan `.thd` ve `.dtshd` decode dogrulamasi yapildi
+- UI smoke testi, Deew tarafindaki eski encoder seciminin kalktigini dogruladi
+- UI smoke testi, AC3/EAC3 kontrollerinin artik FFmpeg pipeline altinda gorundugunu dogruladi
+- FFmpeg AC3 ve EAC3 ciktilari refactor sonrasinda basariyla smoke test edildi
 
-### Dokumantasyon ve metinler
-- Uygulama metinlerinden ve repo dokumantasyonundan `Dolby` / `DEE` ifadeleri kaldirildi
-- README ve changelog terminolojisi guncel UI ile uyumlu hale getirildi
+### Release icerigi
+- Windows `exe` dosyasi v2.2.3 icin guncellendi
+- Changelog, release notes ve README release badge yenilendi
 
 ---
 
 ## Installation / Kurulum
 
-**Windows**: Download `AudioSyncTool-v2.2.2-win64.zip` from the assets below.
+**Windows**: Download `AudioSyncTool-v2.2.3-win64.zip` from the assets below.
 
 **From source**:
 ```bash
