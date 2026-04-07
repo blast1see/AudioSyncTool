@@ -6,6 +6,17 @@
 
 ## English
 
+### [2.2.3] - 2026-04-07
+
+#### Changed
+- **Encoding pipeline separation**: the Deew pipeline is now Deew-only and no longer exposes an FFmpeg encoder switch
+- **FFmpeg AC3/EAC3 outputs moved**: AC3 and EAC3 output options now live under the FFmpeg pipeline where they belong
+- **FFmpeg surround controls**: AC3/EAC3 encoding in the FFmpeg pipeline now includes bitrate and channel layout controls
+
+#### Verified
+- **UI smoke test**: confirmed the old Deew-side encoder selector is gone and AC3/EAC3 controls appear under FFmpeg
+- **FFmpeg encode smoke test**: verified successful AC3 and EAC3 output creation after the pipeline refactor
+
 ### [2.2.2] - 2026-04-05
 
 #### Fixed
@@ -121,6 +132,17 @@
 
 ## Turkce
 
+### [2.2.3] - 2026-04-07
+
+#### Degisenler
+- **Kodlama pipeline ayrimi**: Deew pipeline artik yalnizca Deew kullaniyor ve FFmpeg encoder secimi gostermiyor
+- **FFmpeg AC3/EAC3 ciktilari tasindi**: AC3 ve EAC3 cikti secenekleri artik dogru yerde, FFmpeg pipeline altinda bulunuyor
+- **FFmpeg surround kontrolleri**: FFmpeg pipeline icindeki AC3/EAC3 kodlamasina bitrate ve kanal duzeni kontrolleri eklendi
+
+#### Dogrulama
+- **UI smoke testi**: Deew tarafindaki eski encoder seciminin kalktigi ve AC3/EAC3 kontrollerinin FFmpeg altinda gorundugu dogrulandi
+- **FFmpeg encode smoke testi**: pipeline refactor sonrasi AC3 ve EAC3 ciktilarinin basariyla uretildigi dogrulandi
+
 ### [2.2.2] - 2026-04-05
 
 #### Duzeltilenler
@@ -231,6 +253,7 @@
 - Onceden derlenmis Windows EXE dagitimi
 - MIT Lisansi
 
+[2.2.3]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.2...v2.2.3
 [2.2.2]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.1...v2.2.2
 [2.2.1]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.0...v2.2.1
 [2.2.0]: https://github.com/blast1see/AudioSyncTool/compare/v2.1.0...v2.2.0

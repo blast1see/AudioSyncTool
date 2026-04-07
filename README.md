@@ -5,7 +5,7 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square)](https://github.com/blast1see/AudioSyncTool)
-[![Release](https://img.shields.io/badge/Release-v2.2.2-orange?style=flat-square)](https://github.com/blast1see/AudioSyncTool/releases)
+[![Release](https://img.shields.io/badge/Release-v2.2.3-orange?style=flat-square)](https://github.com/blast1see/AudioSyncTool/releases)
 
 **A robust audio delay detection and synchronization tool with a modern dark-themed GUI.**
 
