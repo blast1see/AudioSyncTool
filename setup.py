@@ -11,8 +11,17 @@ Gereksinimler / Requirements:
 """
 
 import os
-import sys
 import subprocess
+import sys
+
+from build_support import (
+    ENTRY_SCRIPT,
+    ICON_PATH,
+    PYINSTALLER_PATHEX,
+    PYINSTALLER_EXCLUDES,
+    PYINSTALLER_HIDDENIMPORTS,
+    build_environment_warning,
+)
 
 
 def build_exe() -> None:
@@ -20,95 +29,46 @@ def build_exe() -> None:
 
     # Proje kok dizini
     project_root = os.path.dirname(os.path.abspath(__file__))
-    icon_path = os.path.join(project_root, "audio_sync.ico")
-
     # PyInstaller komut satiri argumanlari
     args = [
         sys.executable, "-m", "PyInstaller",
         "--onefile",
         "--windowed",
         "--name", "AudioSyncTool",
-        "--hidden-import", "numpy",
-        "--hidden-import", "scipy",
-        "--hidden-import", "scipy.io",
-        "--hidden-import", "scipy.io.wavfile",
-        "--hidden-import", "scipy.signal",
-        "--hidden-import", "audio_sync",
-        "--hidden-import", "audio_sync.config",
-        "--hidden-import", "audio_sync.i18n",
-        "--hidden-import", "audio_sync.utils",
-        "--hidden-import", "audio_sync.core",
-        "--hidden-import", "audio_sync.core.analyzer",
-        "--hidden-import", "audio_sync.core.ffmpeg_wrapper",
-        "--hidden-import", "audio_sync.core.deew_encoder",
-        "--hidden-import", "audio_sync.core.models",
-        "--hidden-import", "audio_sync.ui",
-        "--hidden-import", "audio_sync.ui.app",
-        "--hidden-import", "audio_sync.ui.drop_zone",
-        "--hidden-import", "audio_sync.ui.stream_dialog",
-        # Qt binding cakismalarini onle
-        "--exclude-module", "PyQt5",
-        "--exclude-module", "PyQt6",
-        "--exclude-module", "PySide2",
-        "--exclude-module", "PySide6",
-        "--exclude-module", "matplotlib",
-        "--exclude-module", "IPython",
-        "--exclude-module", "jupyter",
-        "--exclude-module", "notebook",
-        "--exclude-module", "jupyter_client",
-        "--exclude-module", "nbformat",
-        "--exclude-module", "nbconvert",
-        "--exclude-module", "sphinx",
-        "--exclude-module", "docutils",
-        "--exclude-module", "pytest",
-        "--exclude-module", "PIL",
-        "--exclude-module", "zmq",
-        "--exclude-module", "cryptography",
-        "--exclude-module", "qtpy",
-        "--exclude-module", "pandas",
-        "--exclude-module", "pyarrow",
-        "--exclude-module", "dask",
-        "--exclude-module", "distributed",
-        "--exclude-module", "numba",
-        "--exclude-module", "llvmlite",
-        "--exclude-module", "sklearn",
-        "--exclude-module", "skimage",
-        "--exclude-module", "statsmodels",
-        "--exclude-module", "xarray",
-        "--exclude-module", "bokeh",
-        "--exclude-module", "panel",
-        "--exclude-module", "plotly",
-        "--exclude-module", "altair",
-        "--exclude-module", "astropy",
-        "--exclude-module", "openpyxl",
-        "--exclude-module", "lxml",
-        "--exclude-module", "tables",
-        "--exclude-module", "sqlalchemy",
-        "--exclude-module", "botocore",
-        "--exclude-module", "h5py",
-        "--exclude-module", "pyviz_comms",
-        "--exclude-module", "markdown",
         "--clean",
         "--noconfirm",
-        os.path.join(project_root, "audio_sync.py"),
+        str(ENTRY_SCRIPT),
     ]
 
+    for path_entry in PYINSTALLER_PATHEX:
+        args.extend(["--paths", path_entry])
+
+    for hidden_import in PYINSTALLER_HIDDENIMPORTS:
+        args.extend(["--hidden-import", hidden_import])
+
+    for excluded_module in PYINSTALLER_EXCLUDES:
+        args.extend(["--exclude-module", excluded_module])
+
     # Ikon dosyasi varsa ekle
-    if os.path.isfile(icon_path):
+    if ICON_PATH.is_file():
         # --name'den sonra icon ekle
         idx = args.index("--windowed") + 1
         args.insert(idx, "--icon")
-        args.insert(idx + 1, icon_path)
+        args.insert(idx + 1, str(ICON_PATH))
     else:
-        print(f"Uyari: Ikon dosyasi bulunamadi: {icon_path}")
+        print(f"Uyari: Ikon dosyasi bulunamadi: {ICON_PATH}")
 
     print("=" * 60)
     print("  Audio Sync Tool -- EXE Derleme")
     print("=" * 60)
     print()
     print(f"  Proje dizini : {project_root}")
-    print(f"  Ikon         : {icon_path}")
+    print(f"  Ikon         : {ICON_PATH}")
     print(f"  Python       : {sys.executable}")
+    warning = build_environment_warning(sys.executable)
+    if warning:
+        print()
+        print(f"  Uyari        : {warning}")
     print()
     print("  PyInstaller calistiriliyor...")
     print()

@@ -6,13 +6,16 @@ utility functions in ``utils``.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 import shutil
 import tempfile as _tempfile_mod
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox
+from typing import TYPE_CHECKING, Callable
 
 from audio_sync.config import (
     THEME, FONTS, SYNC_CONFIG, SyncConfig, SyncMode,
@@ -33,15 +36,25 @@ from audio_sync.config import (
     TOOL_PATHS,
     resolve_tool,
 )
-from audio_sync.core.analyzer import AudioAnalyzer
-from audio_sync.core.deew_encoder import DeewEncoder, encode_wav_with_deew
+from audio_sync.core.deew_encoder import encode_wav_with_deew, get_deew_runtime_status, resolve_deew_backend
 from audio_sync.core.encoder import QaacEncoder
 from audio_sync.core.ffmpeg_wrapper import FFmpegWrapper
-from audio_sync.core.models import AnalysisResult, AudioInfo, OutputSampleRate, ProgressCallback
+from audio_sync.core.models import (
+    AnalysisResult,
+    AudioInfo,
+    OperationCancelledError,
+    OutputSampleRate,
+    ProgressCallback,
+)
 from audio_sync.i18n import Language, I18n, get_i18n, t
 from audio_sync.ui.drop_zone import DropZone, is_dnd_available
 from audio_sync.ui.stream_dialog import ask_stream_selection
-from audio_sync.utils import parse_float, parse_int, validate_file, temporary_wav_files
+from audio_sync.utils import parse_float, parse_int, validate_file
+
+if TYPE_CHECKING:
+    import numpy as np
+
+    from audio_sync.core.analyzer import AudioAnalyzer
 
 # Try to use tkinterdnd2 for drag & drop support
 _TkBase: type = tk.Tk
@@ -50,6 +63,21 @@ try:
     _TkBase = TkinterDnD.Tk  # type: ignore[assignment]
 except ImportError:
     pass
+
+
+@dataclass(frozen=True)
+class _PreparedAnalysis:
+    """Shared analysis artifacts reused by analyze-only and full sync flows."""
+
+    src_info: AudioInfo
+    sync_info: AudioInfo
+    output_sr: OutputSampleRate
+    effective_sync_path: str
+    fps_tmp_path: str | None
+    src_rate: int
+    sync_rate: int
+    src_pcm: "np.ndarray"
+    sync_pcm: "np.ndarray"
 
 
 class AudioSyncApp(_TkBase):  # type: ignore[misc]
@@ -63,7 +91,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self,
         config: SyncConfig = SYNC_CONFIG,
         ffmpeg: FFmpegWrapper | None = None,
-        analyzer: AudioAnalyzer | None = None,
+        analyzer: "AudioAnalyzer | None" = None,
     ) -> None:
         super().__init__()
         self.title("Audio Sync Tool")
@@ -78,7 +106,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         # Bağımlılıklar (Dependency Injection)
         self._config = config
         self._ffmpeg = ffmpeg or FFmpegWrapper(config=config)
-        self._analyzer = analyzer or AudioAnalyzer(config=config)
+        self._analyzer = analyzer
 
         # Durum
         self._src_path: str = ""
@@ -86,6 +114,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._delay_ms: float | None = None
         self._processing: bool = False
         self._processing_lock = threading.Lock()
+        self._cancel_event = threading.Event()
 
         # Kullanıcı ayarları
         self.skip_intro_var = tk.StringVar(value="120")
@@ -1153,6 +1182,23 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         )
         self.analyze_btn.pack(fill="x", padx=30, pady=(0, 6))
 
+        self.cancel_btn = tk.Button(
+            self._bottom_bar,
+            text=t("btn_cancel"),
+            font=FONTS.button,
+            fg=THEME.text,
+            bg=THEME.card,
+            activebackground=THEME.card,
+            activeforeground=THEME.text,
+            relief="flat",
+            padx=0,
+            pady=10,
+            cursor="hand2",
+            state="disabled",
+            command=self._cancel_processing,
+        )
+        self.cancel_btn.pack(fill="x", padx=30, pady=(0, 6))
+
         # Çalıştır butonu
         self.run_btn = tk.Button(
             self._bottom_bar,
@@ -1381,7 +1427,12 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         # Butonlar
         if not self._processing:
             self.analyze_btn.config(text=t("analyze_only"))
+            self.cancel_btn.config(text=t("btn_cancel"))
             self.run_btn.config(text=t("start_sync"))
+        elif self._cancel_event.is_set():
+            self.cancel_btn.config(text=t("canceling"))
+        else:
+            self.cancel_btn.config(text=t("btn_cancel"))
 
         # Drop zones
         self.zone_src.update_label(t("source_audio"))
@@ -1456,11 +1507,11 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
     # ── Deew UI Yardımcıları ─────────────────────────────────────────────
 
     def _update_deew_status(self) -> None:
-        deew_ok = DeewEncoder.is_available()
+        deew_ok, _detail = get_deew_runtime_status()
         if deew_ok:
             self._deew_status_lbl.config(text=t("deew_ready"), fg="#4ade80")
         else:
-            self._deew_status_lbl.config(text=t("deew_not_installed"), fg=THEME.accent2)
+            self._deew_status_lbl.config(text=t("deew_unavailable"), fg=THEME.accent2)
 
     def _on_deew_toggle(self) -> None:
         """Legacy no-op — Deew visibility is now controlled by the pipeline dropdown."""
@@ -1774,6 +1825,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
 
     def destroy(self) -> None:
         """Clean up temporary container extraction files on exit."""
+        self._cancel_event.set()
         for tmp in getattr(self, "_container_temp_files", []):
             try:
                 if os.path.isfile(tmp):
@@ -1791,6 +1843,154 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             self.log_box.delete("1.0", "end")
             self.log_box.config(state="disabled")
         self.after(0, _do)
+
+    def _cancel_processing(self) -> None:
+        """Request cancellation for the current background operation."""
+        with self._processing_lock:
+            if not self._processing:
+                return
+        if self._cancel_event.is_set():
+            return
+
+        self._cancel_event.set()
+        self._log(t("log_cancel_requested"))
+        self.after(0, lambda: self.cancel_btn.config(state="disabled", text=t("canceling")))
+
+    def _check_cancelled(self) -> None:
+        """Raise a dedicated exception if the user requested cancellation."""
+        if self._cancel_event.is_set():
+            raise OperationCancelledError("Processing cancelled by user.")
+
+    def _log_timing(self, step_message: str, started_at: float) -> None:
+        """Log the elapsed time for a pipeline step."""
+        elapsed = time.perf_counter() - started_at
+        self._log(t("log_timing", step=step_message, seconds=elapsed))
+
+    def _get_analyzer(self) -> "AudioAnalyzer":
+        """Create the heavy analyzer lazily to keep startup lighter."""
+        if self._analyzer is None:
+            from audio_sync.core.analyzer import AudioAnalyzer as _AudioAnalyzer
+
+            self._analyzer = _AudioAnalyzer(config=self._config)
+        return self._analyzer
+
+    def _prepare_analysis(
+        self,
+        src_path: str,
+        sync_path: str,
+        *,
+        force_48k: bool,
+        fps_conversion: FpsConversion | None,
+        probe_message: str,
+        decode_message: str,
+        probe_progress: int,
+        post_probe_progress: int,
+        fps_progress: int,
+        decode_start_progress: int,
+        src_decoded_progress: int,
+        sync_decoded_progress: int,
+        fps_tmp_prefix: str,
+        detail_logger: Callable[[AudioInfo, AudioInfo, OutputSampleRate], None] | None = None,
+    ) -> _PreparedAnalysis:
+        """Probe, optionally FPS-convert, and decode the pair for analysis."""
+        self._log(probe_message)
+        self._set_progress(probe_progress)
+        probe_started = time.perf_counter()
+        src_info = self._ffmpeg.probe_audio(src_path)
+        sync_info = self._ffmpeg.probe_audio(sync_path)
+        self._log_timing(probe_message, probe_started)
+        self._check_cancelled()
+
+        output_sr = OutputSampleRate.decide(
+            src_info.sample_rate,
+            sync_info.sample_rate,
+            force_48k,
+        )
+        self._update_info_panel(sync_info, output_sr)
+        if detail_logger is not None:
+            detail_logger(src_info, sync_info, output_sr)
+        self._set_progress(post_probe_progress)
+
+        effective_sync_path = sync_path
+        fps_tmp_path: str | None = None
+        if fps_conversion is not None:
+            self._log(t("log_fps_applying", name=fps_conversion.display_name))
+            self._set_progress(fps_progress)
+            fps_started = time.perf_counter()
+
+            fps_tmp_fd, fps_tmp_path = _tempfile_mod.mkstemp(
+                prefix=fps_tmp_prefix,
+                suffix=".wav",
+            )
+            os.close(fps_tmp_fd)
+
+            fps_summary = self._ffmpeg.apply_fps_conversion(
+                sync_path,
+                fps_tmp_path,
+                fps_conversion,
+                sync_info,
+                cancel_event=self._cancel_event,
+            )
+            self._log(f"FPS: {fps_summary}")
+            self._log_timing(t("log_fps_applying", name=fps_conversion.display_name), fps_started)
+            effective_sync_path = fps_tmp_path
+            sync_info = self._ffmpeg.probe_audio(effective_sync_path)
+            self._log(t("log_fps_done"))
+            self._check_cancelled()
+
+        self._log(decode_message)
+        self._set_progress(decode_start_progress)
+        decode_started = time.perf_counter()
+        src_rate, src_pcm = self._ffmpeg.decode_mono_pcm(
+            src_path,
+            cancel_event=self._cancel_event,
+        )
+        self._set_progress(src_decoded_progress)
+        self._check_cancelled()
+        sync_rate, sync_pcm = self._ffmpeg.decode_mono_pcm(
+            effective_sync_path,
+            cancel_event=self._cancel_event,
+        )
+        self._set_progress(sync_decoded_progress)
+        self._log_timing(decode_message, decode_started)
+        self._check_cancelled()
+
+        return _PreparedAnalysis(
+            src_info=src_info,
+            sync_info=sync_info,
+            output_sr=output_sr,
+            effective_sync_path=effective_sync_path,
+            fps_tmp_path=fps_tmp_path,
+            src_rate=src_rate,
+            sync_rate=sync_rate,
+            src_pcm=src_pcm,
+            sync_pcm=sync_pcm,
+        )
+
+    def _calculate_delay_result(
+        self,
+        prepared: _PreparedAnalysis,
+        *,
+        skip_sec: float,
+        segment_count: int,
+        analyze_message: str,
+        progress: int,
+    ) -> AnalysisResult:
+        """Run the actual delay analysis on already-decoded PCM buffers."""
+        self._log(analyze_message)
+        self._set_progress(progress)
+        analysis_started = time.perf_counter()
+        result = self._get_analyzer().calculate_delay_from_arrays(
+            prepared.src_rate,
+            prepared.src_pcm,
+            prepared.sync_pcm,
+            sync_rate=prepared.sync_rate,
+            skip_intro_sec=skip_sec,
+            total_segments=segment_count,
+        )
+        self._log_timing(analyze_message, analysis_started)
+        self._check_cancelled()
+        return result
 
     def _start_analyze(self) -> None:
         """Start analysis-only mode — no file modifications."""
@@ -1816,7 +2016,9 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                 return
             self._processing = True
 
+        self._cancel_event.clear()
         self.analyze_btn.config(state="disabled", text=t("analyzing"))
+        self.cancel_btn.config(state="normal", text=t("btn_cancel"))
         self.run_btn.config(state="disabled")
         self._clear_log()
         self._set_progress(0)
@@ -1827,47 +2029,42 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         """Background thread: passive analysis only, no file modifications."""
         src = self._src_path
         sync = self._sync_path
-        tmp_dir = _tempfile_mod.mkdtemp(prefix="audio_sync_analyze_")
+        fps_tmp_path: str | None = None
 
         try:
             self._log(t("analyze_started"))
             self._set_progress(5)
-
-            # Step 1: Probe audio files
-            self._log(t("analyze_probing"))
-            src_info = self._ffmpeg.probe_audio(src)
-            sync_info = self._ffmpeg.probe_audio(sync)
-            self._set_progress(15)
-
-            # Log file info
-            self._log(t("analyze_src_info",
-                         channels=src_info.channels,
-                         bits=src_info.bits,
-                         sample_rate=src_info.sample_rate))
-            self._log(t("analyze_sync_info",
-                         channels=sync_info.channels,
-                         bits=sync_info.bits,
-                         sample_rate=sync_info.sample_rate))
-
-            # Update info panel on main thread
-            output_sr = OutputSampleRate.decide(
-                src_info.sample_rate, sync_info.sample_rate, False,
+            fps_conversion = self._get_selected_fps_conversion() if self.fps_enabled_var.get() else None
+            prepared = self._prepare_analysis(
+                src,
+                sync,
+                force_48k=False,
+                fps_conversion=fps_conversion,
+                probe_message=t("analyze_probing"),
+                decode_message=t("analyze_converting"),
+                probe_progress=10,
+                post_probe_progress=15,
+                fps_progress=20,
+                decode_start_progress=25,
+                src_decoded_progress=40,
+                sync_decoded_progress=55,
+                fps_tmp_prefix="audiosync_analyze_fps_",
+                detail_logger=lambda src_info, sync_info, _output_sr: (
+                    self._log(t(
+                        "analyze_src_info",
+                        channels=src_info.channels,
+                        bits=src_info.bits,
+                        sample_rate=src_info.sample_rate,
+                    )),
+                    self._log(t(
+                        "analyze_sync_info",
+                        channels=sync_info.channels,
+                        bits=sync_info.bits,
+                        sample_rate=sync_info.sample_rate,
+                    )),
+                ),
             )
-            self.after(0, lambda: self._update_info_panel(sync_info, output_sr))
-
-            # Step 2: Convert to mono WAV for analysis
-            self._log(t("analyze_converting"))
-            self._set_progress(25)
-
-            src_wav = os.path.join(tmp_dir, "src_mono.wav")
-            sync_wav = os.path.join(tmp_dir, "sync_mono.wav")
-            self._ffmpeg.to_wav_mono(src, src_wav)
-            self._set_progress(40)
-            self._ffmpeg.to_wav_mono(sync, sync_wav)
-            self._set_progress(55)
-
-            # Step 3: Calculate delay
-            self._log(t("analyze_calculating"))
+            fps_tmp_path = prepared.fps_tmp_path
 
             skip_sec = parse_float(
                 self.skip_intro_var.get(), default=120.0, minimum=0.0, maximum=3600.0,
@@ -1876,19 +2073,20 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                 self.segment_count_var.get(), default=12, minimum=4, maximum=40,
             )
 
-            result = self._analyzer.calculate_delay(
-                src_wav, sync_wav,
-                skip_intro_sec=skip_sec,
-                total_segments=segment_count,
+            result = self._calculate_delay_result(
+                prepared,
+                skip_sec=skip_sec,
+                segment_count=segment_count,
+                analyze_message=t("analyze_calculating"),
+                progress=60,
             )
             self._set_progress(85)
+            self._check_cancelled()
 
-            # Step 4: Display comprehensive results
             self._log("")
             self._log(t("analyze_result_header"))
             self._log("")
 
-            # Sync point time (convert delay_ms to timestamp format)
             abs_ms = abs(result.delay_ms)
             hours = int(abs_ms // 3600000)
             minutes = int((abs_ms % 3600000) // 60000)
@@ -1897,11 +2095,9 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
             self._log(t("sync_point_time", time=time_str))
 
-            # Delay amount with description
-            description = AudioAnalyzer.describe_offset(result.delay_ms)
+            description = self._get_analyzer().describe_offset(result.delay_ms)
             self._log(t("delay_amount", delay_ms=result.delay_ms, description=description))
 
-            # Confidence score with level
             if result.confidence >= 8.0:
                 conf_level = t("confidence_high")
             elif result.confidence >= 4.0:
@@ -1910,44 +2106,42 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                 conf_level = t("confidence_low")
             self._log(t("confidence_score", confidence=result.confidence) + f" ({conf_level})")
 
-            # Drift amount
             if result.drift_ms_per_min is not None:
                 self._log(t("drift_amount", drift=result.drift_ms_per_min))
             else:
                 self._log(t("drift_none"))
 
-            # Coarse delay
             self._log(t("coarse_delay", coarse_ms=result.coarse_ms))
-
-            # Segments used
             self._log(t("segments_used", used=result.used_segments, total=result.total_segments))
 
             self._log("")
             self._log(t("analyze_result_header"))
             self._log("")
 
-            # Also use existing display method for info panel update
             self.after(0, lambda: self._display_analysis_result(result))
 
             self._set_progress(100)
             self._log(t("analyze_complete"))
 
+        except OperationCancelledError:
+            self._log(t("log_cancelled"))
         except Exception as e:
             self._log(f"❌ Error: {e}")
             import traceback
             self._log(traceback.format_exc())
         finally:
-            # Clean up temp files
-            try:
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-            except Exception:
-                pass
+            if fps_tmp_path and os.path.isfile(fps_tmp_path):
+                try:
+                    os.remove(fps_tmp_path)
+                except OSError:
+                    pass
 
-            # Re-enable buttons on main thread
             def _restore() -> None:
                 with self._processing_lock:
                     self._processing = False
+                self._cancel_event.clear()
                 self.analyze_btn.config(state="normal", text=t("analyze_only"))
+                self.cancel_btn.config(state="disabled", text=t("btn_cancel"))
                 self.run_btn.config(state="normal", text=t("start_sync"))
 
             self.after(0, _restore)
@@ -1975,7 +2169,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
 
         if deew_enabled:
             try:
-                DeewEncoder.check_availability()
+                resolve_deew_backend()
             except OSError as e:
                 messagebox.showerror(t("deew_not_found_title"), str(e))
                 self._reset_processing()
@@ -2112,7 +2306,9 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         src_path = self._src_path
         sync_path = self._sync_path
 
+        self._cancel_event.clear()
         self.analyze_btn.config(state="disabled")
+        self.cancel_btn.config(state="normal", text=t("btn_cancel"))
         self.run_btn.config(state="disabled", text=t("processing"))
         self._set_progress(0)
 
@@ -2146,63 +2342,45 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         fps_tmp_path: str | None = None
         wav_out_path: str | None = None  # Deew encoding ara WAV dosyası
         needs_encoding: bool = False
+        out_path_preexisting = os.path.exists(out_path)
 
         try:
-            # 1. Ses bilgilerini oku
-            self._log(t("log_reading_info"))
-            self._set_progress(5)
-            src_info = self._ffmpeg.probe_audio(src_path)
-            sync_info = self._ffmpeg.probe_audio(sync_path)
-
-            output_sr = OutputSampleRate.decide(src_info.sample_rate, sync_info.sample_rate, force_48k)
-
-            self._update_info_panel(sync_info, output_sr)
-            self._log_audio_info(src_info, sync_info, output_sr, skip_sec, segment_count)
+            prepared = self._prepare_analysis(
+                src_path,
+                sync_path,
+                force_48k=force_48k,
+                fps_conversion=fps_conversion,
+                probe_message=t("log_reading_info"),
+                decode_message=t("log_preparing_mono"),
+                probe_progress=5,
+                post_probe_progress=12,
+                fps_progress=16,
+                decode_start_progress=22,
+                src_decoded_progress=30,
+                sync_decoded_progress=40,
+                fps_tmp_prefix="audiosync_fps_",
+                detail_logger=lambda src_info, sync_info, output_sr: self._log_audio_info(
+                    src_info,
+                    sync_info,
+                    output_sr,
+                    skip_sec,
+                    segment_count,
+                ),
+            )
+            fps_tmp_path = prepared.fps_tmp_path
             self._log(t("log_sync_mode", mode=sync_mode.display_name))
 
-            # 1.5. FPS dönüşümü (etkinse)
-            effective_sync_path = sync_path
-            if fps_conversion is not None:
-                self._log(t("log_fps_applying", name=fps_conversion.display_name))
-                self._set_progress(8)
+            result = self._calculate_delay_result(
+                prepared,
+                skip_sec=skip_sec,
+                segment_count=segment_count,
+                analyze_message=t("log_analyzing"),
+                progress=48,
+            )
 
-                fps_tmp_fd, fps_tmp_path = _tempfile_mod.mkstemp(
-                    prefix="audiosync_fps_", suffix=".wav",
-                )
-                os.close(fps_tmp_fd)
-
-                fps_summary = self._ffmpeg.apply_fps_conversion(
-                    sync_path, fps_tmp_path, fps_conversion, sync_info,
-                )
-                self._log(f"FPS: {fps_summary}")
-
-                effective_sync_path = fps_tmp_path
-                sync_info = self._ffmpeg.probe_audio(effective_sync_path)
-                self._log(t("log_fps_done"))
-
-            # 2. Mono WAV hazırla
-            self._log(t("log_preparing_mono"))
-            self._set_progress(15)
-
-            with temporary_wav_files() as (tmp_src, tmp_sync):
-                self._ffmpeg.to_wav_mono(src_path, tmp_src)
-                self._ffmpeg.to_wav_mono(effective_sync_path, tmp_sync)
-
-                # 3. Gecikme analizi
-                self._log(t("log_analyzing"))
-                self._set_progress(35)
-                result = self._analyzer.calculate_delay(
-                    tmp_src, tmp_sync,
-                    skip_intro_sec=skip_sec,
-                    total_segments=segment_count,
-                )
-
-            # 4. Sonuçları göster
             self._delay_ms = result.delay_ms
             self._display_analysis_result(result)
 
-            # 5. FFmpeg ile senkronizasyon uygula
-            # Determine if we need a temp WAV (any encoding pipeline selected)
             enc = encoding_params or {}
             pipeline = enc.get("pipeline", EncodingPipeline.NONE.value)
             needs_encoding = (
@@ -2214,28 +2392,33 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             )
 
             if needs_encoding:
-                # Sync to temp WAV, then encode to final output
                 _fd, wav_out_path = _tempfile_mod.mkstemp(
                     suffix=".wav", prefix="audiosync_",
                     dir=os.path.dirname(out_path) or ".",
                 )
                 os.close(_fd)
             else:
-                # No encoding — sync directly to user's chosen path
                 wav_out_path = out_path
 
             self._log(t("log_applying_sync"))
-            self._set_progress(55)
+            self._set_progress(60)
+            sync_started = time.perf_counter()
+            self._check_cancelled()
             cmd_summary = self._ffmpeg.apply_sync(
-                src_path, effective_sync_path, result.delay_ms,
-                sync_info, output_sr, wav_out_path,
+                src_path,
+                prepared.effective_sync_path,
+                result.delay_ms,
+                prepared.sync_info,
+                prepared.output_sr,
+                wav_out_path,
                 sync_mode=sync_mode,
+                cancel_event=self._cancel_event,
             )
+            self._log_timing(t("log_applying_sync"), sync_started)
             self._log(t("log_command", cmd=cmd_summary))
 
-            # 6. Deew encoding (etkinse)
             if deew_params is not None:
-                self._set_progress(70)
+                self._set_progress(78)
                 fmt: DeewFormat = deew_params["format"]
                 self._log(t("log_deew_start"))
                 self._log(t("log_deew_info",
@@ -2244,6 +2427,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                     ch=deew_params['downmix'].display_name if deew_params['downmix'] else t("source_keep"),
                     enc="Deew",
                 ))
+                self._check_cancelled()
+                encode_started = time.perf_counter()
 
                 try:
                     final_path = encode_wav_with_deew(
@@ -2256,7 +2441,9 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                         dialnorm=deew_params["dialnorm"],
                         delete_wav=deew_params["delete_wav"],
                         progress_callback=self._log,
+                        cancel_event=self._cancel_event,
                     )
+                    self._log_timing(t("log_deew_start"), encode_started)
                     self._set_progress(95)
                     self._log(t("log_deew_done", name=os.path.basename(final_path)))
                 except Exception as deew_err:
@@ -2271,23 +2458,40 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                             f"Deew encoding failed and WAV file not found: {deew_err}"
                         ) from deew_err
 
-            # 6b. Encoding pipeline (FFmpeg/qaac/Native — when not using Deew)
             if deew_params is None:
                 if pipeline == EncodingPipeline.FFMPEG.value:
                     self._log(t("encoding_started"))
                     fmt_codec = enc.get("ffmpeg_format", FFmpegOutputFormat.AAC.codec)
                     ffmpeg_channels = enc.get("ffmpeg_downmix_channels")
+                    self._check_cancelled()
+                    encode_started = time.perf_counter()
 
                     if fmt_codec == FFmpegOutputFormat.AAC.codec:
                         bitrate = enc.get("ffmpeg_aac_bitrate", 256)
-                        summary = self._ffmpeg.encode_to_aac(wav_out_path, out_path, bitrate=bitrate)
+                        summary = self._ffmpeg.encode_to_aac(
+                            wav_out_path,
+                            out_path,
+                            bitrate=bitrate,
+                            cancel_event=self._cancel_event,
+                        )
                     elif fmt_codec == FFmpegOutputFormat.FLAC.codec:
                         compression = enc.get("ffmpeg_flac_compression", 5)
                         bit_depth = enc.get("ffmpeg_flac_bit_depth", 24)
-                        summary = self._ffmpeg.encode_to_flac(wav_out_path, out_path, compression=compression, bit_depth=bit_depth)
+                        summary = self._ffmpeg.encode_to_flac(
+                            wav_out_path,
+                            out_path,
+                            compression=compression,
+                            bit_depth=bit_depth,
+                            cancel_event=self._cancel_event,
+                        )
                     elif fmt_codec == FFmpegOutputFormat.OPUS.codec:
                         bitrate = enc.get("ffmpeg_opus_bitrate", 128)
-                        summary = self._ffmpeg.encode_to_opus(wav_out_path, out_path, bitrate=bitrate)
+                        summary = self._ffmpeg.encode_to_opus(
+                            wav_out_path,
+                            out_path,
+                            bitrate=bitrate,
+                            cancel_event=self._cancel_event,
+                        )
                     elif fmt_codec == FFmpegOutputFormat.AC3.codec:
                         bitrate = enc.get("ffmpeg_ac3eac3_bitrate", FFMPEG_AC3_DEFAULT_BITRATE)
                         summary = self._ffmpeg.encode_to_ac3_eac3(
@@ -2296,6 +2500,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                             fmt=DeewFormat.DD,
                             bitrate=bitrate,
                             channels=ffmpeg_channels,
+                            cancel_event=self._cancel_event,
                         )
                     elif fmt_codec == FFmpegOutputFormat.EAC3.codec:
                         bitrate = enc.get("ffmpeg_ac3eac3_bitrate", FFMPEG_EAC3_DEFAULT_BITRATE)
@@ -2305,15 +2510,19 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                             fmt=DeewFormat.DDP,
                             bitrate=bitrate,
                             channels=ffmpeg_channels,
+                            cancel_event=self._cancel_event,
                         )
                     else:
                         summary = ""
 
+                    self._log_timing(t("encoding_started"), encode_started)
                     self._log(t("encoding_complete", summary=summary))
                     self._set_progress(95)
 
                 elif pipeline == EncodingPipeline.QAAC.value:
                     self._log(t("encoding_started"))
+                    self._check_cancelled()
+                    encode_started = time.perf_counter()
                     mode_flag = enc.get("qaac_mode", QaacMode.TVBR.flag)
                     mode = next((m for m in QaacMode if m.flag == mode_flag), QaacMode.TVBR)
 
@@ -2327,28 +2536,38 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                         no_delay=enc.get("qaac_no_delay", True),
                     )
 
-                    summary = QaacEncoder.encode(wav_out_path, out_path, config)
+                    summary = QaacEncoder.encode(
+                        wav_out_path,
+                        out_path,
+                        config,
+                        cancel_event=self._cancel_event,
+                    )
+                    self._log_timing(t("encoding_started"), encode_started)
                     self._log(t("encoding_complete", summary=summary))
                     self._set_progress(95)
 
-            # 7. Tamamlandı
             self._set_progress(100)
             self._log(t("log_completed", name=os.path.basename(out_path)))
             self.after(0, lambda: messagebox.showinfo(
                 t("success_title"), t("file_saved_msg", path=out_path),
             ))
 
+        except OperationCancelledError:
+            self._log(t("log_cancelled"))
+            if not out_path_preexisting and os.path.isfile(out_path):
+                try:
+                    os.remove(out_path)
+                except OSError:
+                    pass
         except Exception as e:
             self._log(t("log_error", err=e))
             self.after(0, lambda err=str(e): messagebox.showerror(t("error_title"), err))
-            # Clean up partial/corrupt output file on encoding failure
-            if needs_encoding and os.path.isfile(out_path):
+            if not out_path_preexisting and os.path.isfile(out_path):
                 try:
                     os.remove(out_path)
                 except OSError:
                     pass
         finally:
-            # Geçici dosyaları temizle
             for tmp_path in (fps_tmp_path, wav_out_path):
                 if tmp_path is not None and tmp_path != out_path and os.path.isfile(tmp_path):
                     try:
@@ -2359,7 +2578,9 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                 self._processing = False
 
             def _restore_buttons() -> None:
+                self._cancel_event.clear()
                 self.analyze_btn.config(state="normal", text=t("analyze_only"))
+                self.cancel_btn.config(state="disabled", text=t("btn_cancel"))
                 self.run_btn.config(state="normal", text=t("start_sync"))
 
             self.after(0, _restore_buttons)
@@ -2367,6 +2588,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
     def _reset_processing(self) -> None:
         with self._processing_lock:
             self._processing = False
+        self._cancel_event.clear()
+        self.after(0, lambda: self.cancel_btn.config(state="disabled", text=t("btn_cancel")))
 
     # ── Bilgi Gösterimi ──────────────────────────────────────────────────
 

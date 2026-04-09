@@ -7,23 +7,17 @@ Kullanım::
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 
 
 def _check_dependencies() -> None:
     """Gerekli bağımlılıkların kurulu olduğunu doğrular."""
-    missing: list[str] = []
-
-    try:
-        import numpy  # noqa: F401
-    except ImportError:
-        missing.append("numpy")
-
-    try:
-        from scipy.io import wavfile  # noqa: F401
-        from scipy.signal import butter, correlate, sosfiltfilt  # noqa: F401
-    except ImportError:
-        missing.append("scipy")
+    missing = [
+        package
+        for package in ("numpy", "scipy")
+        if importlib.util.find_spec(package) is None
+    ]
 
     if missing:
         print(

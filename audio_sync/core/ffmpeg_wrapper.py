@@ -9,11 +9,13 @@ Bu modül dış süreç çağrılarını soyutlayarak:
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
+import threading
 import warnings
 from typing import Protocol
+
+import numpy as np
 
 from audio_sync.config import (
     CODEC_EXTENSION_MAP,
@@ -26,6 +28,7 @@ from audio_sync.config import (
     resolve_tool,
 )
 from audio_sync.core.models import AudioInfo, OutputSampleRate
+from audio_sync.core.process_runner import run_binary_process, run_text_process
 
 
 # ── Komut Çalıştırıcı Protokolü ─────────────────────────────────────────────
@@ -250,7 +253,12 @@ class FFmpegWrapper:
 
     # ── Mono WAV Conversion ──────────────────────────────────────────────
 
-    def to_wav_mono(self, src: str, out_path: str) -> None:
+    def to_wav_mono(
+        self,
+        src: str,
+        out_path: str,
+        cancel_event: threading.Event | None = None,
+    ) -> None:
         """Senkron analizi için tek kanallı, düşük örneklemeli WAV hazırlar.
 
         Args:
@@ -275,10 +283,62 @@ class FFmpegWrapper:
         result = self._run_command(
             cmd,
             timeout=self._get_ffmpeg_timeout(src),
+            cancel_event=cancel_event,
         )
         if result.returncode != 0:
             stderr_tail = result.stderr[-400:] if result.stderr else "(stderr empty)"
             raise RuntimeError(f"Mono conversion error:\n{stderr_tail}")
+
+    def decode_mono_pcm(
+        self,
+        src: str,
+        sample_rate: int | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> tuple[int, np.ndarray]:
+        """Decode audio to mono 16-bit PCM in memory for analysis.
+
+        This avoids creating temporary WAV files during delay analysis.
+        """
+        analysis_rate = sample_rate or self._config.analysis_sample_rate
+        cmd = [
+            resolve_tool("ffmpeg"),
+            "-v", "error",
+            "-nostdin",
+            "-i", src,
+            "-vn",
+            "-sn",
+            "-dn",
+            "-ar", str(analysis_rate),
+            "-ac", "1",
+            "-acodec", "pcm_s16le",
+            "-f", "s16le",
+            "-",
+        ]
+        result = self._run_binary_command(
+            cmd,
+            timeout=self._get_ffmpeg_timeout(src),
+            cancel_event=cancel_event,
+        )
+        if result.returncode != 0:
+            stderr_tail = (
+                result.stderr.decode("utf-8", errors="replace")[-400:]
+                if result.stderr else "(stderr empty)"
+            )
+            raise RuntimeError(f"Mono decode error:\n{stderr_tail}")
+
+        pcm_bytes = result.stdout or b""
+        if not pcm_bytes:
+            raise RuntimeError("Mono decode returned no audio samples.")
+
+        # int16 PCM must have an even byte count.
+        if len(pcm_bytes) % 2 != 0:
+            pcm_bytes = pcm_bytes[:-1]
+
+        pcm = np.frombuffer(pcm_bytes, dtype=np.int16)
+        if pcm.size == 0:
+            raise RuntimeError("Mono decode returned an empty PCM buffer.")
+
+        return analysis_rate, pcm
 
     # ── FPS Dönüşümü ────────────────────────────────────────────────────
 
@@ -288,6 +348,7 @@ class FFmpegWrapper:
         out_path: str,
         conversion: FpsConversion,
         audio_info: AudioInfo,
+        cancel_event: threading.Event | None = None,
     ) -> str:
         """Ses dosyasının frame rate'ini dönüştürür (tempo değişikliği).
 
@@ -346,6 +407,7 @@ class FFmpegWrapper:
         result = self._run_command(
             cmd,
             timeout=self._get_ffmpeg_timeout(src),
+            cancel_event=cancel_event,
         )
         if result.returncode != 0:
             stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
@@ -364,6 +426,7 @@ class FFmpegWrapper:
         output_sr: OutputSampleRate,
         out_path: str,
         sync_mode: SyncMode = SyncMode.ADELAY_AMIX,
+        cancel_event: threading.Event | None = None,
     ) -> str:
         """Orijinal dosyaları senkronize eder, karıştırır ve WAV olarak yazar.
 
@@ -422,6 +485,7 @@ class FFmpegWrapper:
         result = self._run_command(
             cmd,
             timeout=self._get_ffmpeg_timeout(src_orig, sync_orig),
+            cancel_event=cancel_event,
         )
         if result.returncode != 0:
             stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
@@ -730,6 +794,7 @@ class FFmpegWrapper:
         fmt: DeewFormat,
         bitrate: int,
         channels: int | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> str:
         """WAV dosyasını FFmpeg ile AC3 veya EAC3 formatına dönüştürür.
 
@@ -773,6 +838,7 @@ class FFmpegWrapper:
         result = self._run_command(
             cmd,
             timeout=self._get_ffmpeg_timeout(input_wav),
+            cancel_event=cancel_event,
         )
         if result.returncode != 0:
             stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
@@ -788,6 +854,7 @@ class FFmpegWrapper:
         output_path: str,
         bitrate: int = 256,
         channels: int | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> str:
         """Encode audio to AAC format using FFmpeg.
 
@@ -819,6 +886,7 @@ class FFmpegWrapper:
         result = self._run_command(
             cmd,
             timeout=self._get_ffmpeg_timeout(input_path),
+            cancel_event=cancel_event,
         )
         if result.returncode != 0:
             stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
@@ -833,6 +901,7 @@ class FFmpegWrapper:
         compression: int = 5,
         bit_depth: int = 24,
         channels: int | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> str:
         """Encode audio to FLAC format using FFmpeg.
 
@@ -873,6 +942,7 @@ class FFmpegWrapper:
         result = self._run_command(
             cmd,
             timeout=self._get_ffmpeg_timeout(input_path),
+            cancel_event=cancel_event,
         )
         if result.returncode != 0:
             stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
@@ -886,6 +956,7 @@ class FFmpegWrapper:
         output_path: str,
         bitrate: int = 128,
         channels: int | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> str:
         """Encode audio to Opus format using FFmpeg.
 
@@ -917,6 +988,7 @@ class FFmpegWrapper:
         result = self._run_command(
             cmd,
             timeout=self._get_ffmpeg_timeout(input_path),
+            cancel_event=cancel_event,
         )
         if result.returncode != 0:
             stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
@@ -930,6 +1002,7 @@ class FFmpegWrapper:
         self,
         cmd: list[str],
         timeout: int | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Komutu güvenli şekilde çalıştırır.
 
@@ -944,22 +1017,61 @@ class FFmpegWrapper:
             RuntimeError: Zaman aşımı durumunda.
             OSError: Komut bulunamazsa.
         """
-        try:
-            return self._runner.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(
+        if cancel_event is None:
+            try:
+                return self._runner.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                )
+            except subprocess.TimeoutExpired:
+                raise RuntimeError(
+                    f"'{cmd[0]}' command did not complete within {timeout} seconds. "
+                    f"The file may be corrupted or inaccessible."
+                )
+            except FileNotFoundError:
+                raise OSError(
+                    f"'{cmd[0]}' not found. Make sure FFmpeg is in your PATH."
+                )
+
+        return self._run_text_command(cmd, timeout=timeout, cancel_event=cancel_event)
+
+    def _run_binary_command(
+        self,
+        cmd: list[str],
+        timeout: int | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> subprocess.CompletedProcess[bytes]:
+        """Run a command and capture binary stdout/stderr."""
+        return run_binary_process(
+            cmd,
+            timeout=timeout,
+            cancel_event=cancel_event,
+            not_found_message=f"'{cmd[0]}' not found. Make sure FFmpeg is in your PATH.",
+            timeout_message=(
                 f"'{cmd[0]}' command did not complete within {timeout} seconds. "
                 f"The file may be corrupted or inaccessible."
-            )
-        except FileNotFoundError:
-            raise OSError(
-                f"'{cmd[0]}' not found. Make sure FFmpeg is in your PATH."
-            )
+            ),
+        )
+
+    def _run_text_command(
+        self,
+        cmd: list[str],
+        timeout: int | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        """Run a command with cancellation support and capture text output."""
+        return run_text_process(
+            cmd,
+            timeout=timeout,
+            cancel_event=cancel_event,
+            not_found_message=f"'{cmd[0]}' not found. Make sure FFmpeg is in your PATH.",
+            timeout_message=(
+                f"'{cmd[0]}' command did not complete within {timeout} seconds. "
+                f"The file may be corrupted or inaccessible."
+            ),
+        )
 
     def _get_ffmpeg_timeout(self, *input_paths: str) -> int:
         """Scale FFmpeg timeout for large or slow-to-decode audio inputs."""
