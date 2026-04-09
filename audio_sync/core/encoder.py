@@ -5,9 +5,11 @@ from __future__ import annotations
 import logging
 import subprocess
 import sys
+import threading
 from typing import Tuple
 
 from audio_sync.config import QaacConfig, QaacMode, resolve_tool
+from audio_sync.core.process_runner import run_text_process
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,7 @@ class QaacEncoder:
         input_path: str,
         output_path: str,
         config: QaacConfig | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> str:
         """Encode audio file using qaac.
 
@@ -101,21 +104,20 @@ class QaacEncoder:
 
         logger.info("qaac command: %s", " ".join(cmd))
 
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=600,
-                **_PLATFORM_SUBPROCESS_KWARGS,
+        result = run_text_process(
+            cmd,
+            timeout=config.timeout_sec,
+            cancel_event=cancel_event,
+            not_found_message=(
+                f"'{binary}' could not be executed. Make sure qaac is installed correctly."
+            ),
+            timeout_message=f"qaac encoding timed out (>{config.timeout_sec}s)",
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"qaac encoding failed (exit code {result.returncode}):\n"
+                f"{result.stderr}"
             )
-            if result.returncode != 0:
-                raise RuntimeError(
-                    f"qaac encoding failed (exit code {result.returncode}):\n"
-                    f"{result.stderr}"
-                )
-        except subprocess.TimeoutExpired:
-            raise RuntimeError("qaac encoding timed out (>600s)")
 
         mode_label = config.mode.label
         if config.mode == QaacMode.TVBR:

@@ -167,6 +167,10 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "Deew ● kurulu değil",
         "en": "Deew ● not installed",
     },
+    "deew_unavailable": {
+        "tr": "Deew ● kullanılamıyor",
+        "en": "Deew ● unavailable",
+    },
     "deew_desc": {
         "tr": "  → Deew ile AC3/EAC3 çıktı oluştur",
         "en": "  → Create AC3/EAC3 output with Deew",
@@ -220,6 +224,10 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "processing": {
         "tr": "İşleniyor…",
         "en": "Processing…",
+    },
+    "canceling": {
+        "tr": "İptal ediliyor…",
+        "en": "Canceling…",
     },
 
     # ── Dil Seçimi ──
@@ -288,8 +296,8 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "FPS conversion completed, converted audio will be used.",
     },
     "log_preparing_mono": {
-        "tr": "Analiz için tek kanallı WAV hazırlanıyor…",
-        "en": "Preparing mono WAV for analysis…",
+        "tr": "Analiz için tek kanallı ses akışı hazırlanıyor…",
+        "en": "Preparing mono analysis audio…",
     },
     "log_analyzing": {
         "tr": "Sağlam senkron analizi yapılıyor…",
@@ -298,6 +306,10 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "log_applying_sync": {
         "tr": "FFmpeg ile senkronizasyon uygulanıyor…",
         "en": "Applying synchronization with FFmpeg…",
+    },
+    "log_timing": {
+        "tr": "Süre: {step} ({seconds:.2f} sn)",
+        "en": "Timing: {step} ({seconds:.2f}s)",
     },
     "log_command": {
         "tr": "Komut: {cmd}",
@@ -350,6 +362,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "log_error": {
         "tr": "✗ Hata: {err}",
         "en": "✗ Error: {err}",
+    },
+    "log_cancel_requested": {
+        "tr": "İptal isteği alındı, mevcut adım güvenli şekilde durdurulacak.",
+        "en": "Cancel requested, the current step will stop safely.",
+    },
+    "log_cancelled": {
+        "tr": "İşlem kullanıcı tarafından iptal edildi.",
+        "en": "Operation cancelled by user.",
     },
     "log_sync_mode": {
         "tr": "Senkronizasyon modu: {mode}",
@@ -542,8 +562,8 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "📡 Reading file information…",
     },
     "analyze_converting": {
-        "tr": "🔄 Analiz için WAV dönüşümü yapılıyor…",
-        "en": "🔄 Converting to WAV for analysis…",
+        "tr": "🔄 Analiz için ses akışı hazırlanıyor…",
+        "en": "🔄 Preparing analysis audio…",
     },
     "analyze_calculating": {
         "tr": "⚡ Gecikme hesaplanıyor…",

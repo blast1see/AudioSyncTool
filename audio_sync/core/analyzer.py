@@ -15,6 +15,8 @@ from scipy.signal import butter, correlate, fftconvolve, sosfiltfilt
 from audio_sync.config import SyncConfig, SYNC_CONFIG
 from audio_sync.core.models import AnalysisResult
 
+ANALYSIS_DTYPE = np.float32
+
 
 class AudioAnalyzer:
     """Ses analizi ve gecikme hesaplama motoru.
@@ -64,7 +66,52 @@ class AudioAnalyzer:
             Pozitif delay_ms → sync ses ileride (erken başlıyor).
             Negatif delay_ms → sync ses geride (geç başlıyor).
         """
-        rate, d1, d2 = self._load_and_validate(src_wav, sync_wav)
+        rate1, data1 = wavfile.read(src_wav)
+        rate2, data2 = wavfile.read(sync_wav)
+        return self.calculate_delay_from_arrays(
+            rate1,
+            data1,
+            data2,
+            sync_rate=rate2,
+            skip_intro_sec=skip_intro_sec,
+            total_segments=total_segments,
+        )
+
+    def calculate_delay_from_arrays(
+        self,
+        rate: int,
+        src_audio: np.ndarray,
+        sync_audio: np.ndarray,
+        *,
+        sync_rate: int | None = None,
+        skip_intro_sec: float = 120.0,
+        total_segments: int = 12,
+    ) -> AnalysisResult:
+        """İki mono PCM dizisi arasında gecikme hesaplar."""
+        rate, d1, d2 = self._prepare_arrays(
+            rate,
+            src_audio,
+            sync_audio,
+            sync_rate=sync_rate,
+        )
+        return self._calculate_delay_from_normalized(
+            rate,
+            d1,
+            d2,
+            skip_intro_sec=skip_intro_sec,
+            total_segments=total_segments,
+        )
+
+    def _calculate_delay_from_normalized(
+        self,
+        rate: int,
+        d1: np.ndarray,
+        d2: np.ndarray,
+        *,
+        skip_intro_sec: float,
+        total_segments: int,
+    ) -> AnalysisResult:
+        """Çekirdek gecikme hesabını normalize edilmiş diziler üzerinde çalıştırır."""
         cfg = self._config
 
         # Atlama hesabı
@@ -75,11 +122,16 @@ class AudioAnalyzer:
             d1, d2, skip_samples, int(rate * cfg.min_audio_duration_sec),
         )
 
-        # Bandpass filtreyi bir kez uygula (performans optimizasyonu)
-        d1_coarse_filtered = self.bandpass_for_sync(d1_for_coarse, rate)
-        d2_coarse_filtered = self.bandpass_for_sync(d2_for_coarse, rate)
         d1_full_filtered = self.bandpass_for_sync(d1, rate)
         d2_full_filtered = self.bandpass_for_sync(d2, rate)
+
+        # Atlama uygulanmadığında kaba ve ince analiz aynı filtreli sinyali paylaşır.
+        if skip_samples == 0:
+            d1_coarse_filtered = d1_full_filtered
+            d2_coarse_filtered = d2_full_filtered
+        else:
+            d1_coarse_filtered = self.bandpass_for_sync(d1_for_coarse, rate)
+            d2_coarse_filtered = self.bandpass_for_sync(d2_for_coarse, rate)
 
         # Kaba analiz
         coarse_feat1, coarse_rate = self._build_feature_from_filtered(
@@ -128,24 +180,24 @@ class AudioAnalyzer:
             data: ``wavfile.read()`` çıktısı (int16/int32/float32/float64).
 
         Returns:
-            Normalize edilmiş float64 dizisi, tepe değeri 1.0.
+            Normalize edilmiş float32 dizisi, tepe değeri 1.0.
         """
-        x = data.astype(np.float64, copy=True)
+        x = data.astype(ANALYSIS_DTYPE, copy=True)
 
         if np.issubdtype(data.dtype, np.integer):
             info = np.iinfo(data.dtype)
-            x *= 1.0 / max(abs(info.min), info.max)
+            x *= ANALYSIS_DTYPE(1.0 / max(abs(info.min), info.max))
 
         # NaN/Inf temizle (in-place)
         np.nan_to_num(x, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
 
         # DC offset kaldır (in-place)
-        x -= np.mean(x)
+        x -= np.mean(x, dtype=np.float64)
 
         # Tepe normalizasyonu (in-place)
         peak = np.max(np.abs(x)) if x.size > 0 else 0.0
         if peak > 1e-9:
-            x *= 1.0 / peak
+            x *= ANALYSIS_DTYPE(1.0 / peak)
 
         return x
 
@@ -173,7 +225,7 @@ class AudioAnalyzer:
                 cfg.bandpass_order, [low, high],
                 btype="bandpass", fs=rate, output="sos",
             )
-            return sosfiltfilt(sos, x)
+            return np.asarray(sosfiltfilt(sos, x), dtype=ANALYSIS_DTYPE)
         except Exception as exc:
             warnings.warn(
                 f"Bandpass filtre uygulanamadı, filtresiz sinyal kullanılıyor: {exc}",
@@ -221,10 +273,15 @@ class AudioAnalyzer:
 
     # ── Dahili Yardımcılar ───────────────────────────────────────────────
 
-    def _load_and_validate(
-        self, src_wav: str, sync_wav: str,
+    def _prepare_arrays(
+        self,
+        rate: int,
+        src_audio: np.ndarray,
+        sync_audio: np.ndarray,
+        *,
+        sync_rate: int | None = None,
     ) -> tuple[int, np.ndarray, np.ndarray]:
-        """WAV dosyalarını yükler, doğrular ve normalize eder.
+        """PCM dizilerini doğrular ve normalize eder.
 
         Returns:
             ``(rate, d1_normalized, d2_normalized)`` üçlüsü.
@@ -232,15 +289,12 @@ class AudioAnalyzer:
         Raises:
             RuntimeError: Örnekleme oranları eşleşmiyorsa veya dosyalar çok kısaysa.
         """
-        rate1, data1 = wavfile.read(src_wav)
-        rate2, data2 = wavfile.read(sync_wav)
-
-        if rate1 != rate2:
+        effective_sync_rate = rate if sync_rate is None else sync_rate
+        if rate != effective_sync_rate:
             raise RuntimeError("Analiz örnekleme oranları eşleşmiyor.")
 
-        rate = rate1
-        d1 = self.normalize_audio(data1)
-        d2 = self.normalize_audio(data2)
+        d1 = self.normalize_audio(src_audio)
+        d2 = self.normalize_audio(sync_audio)
 
         min_samples = int(rate * self._config.min_audio_duration_sec)
         if len(d1) < min_samples or len(d2) < min_samples:
@@ -265,8 +319,8 @@ class AudioAnalyzer:
         """
         skip_fallback = False
 
-        d1_coarse = d1[skip_samples:] if skip_samples < len(d1) else np.array([], dtype=np.float64)
-        d2_coarse = d2[skip_samples:] if skip_samples < len(d2) else np.array([], dtype=np.float64)
+        d1_coarse = d1[skip_samples:] if skip_samples < len(d1) else np.array([], dtype=ANALYSIS_DTYPE)
+        d2_coarse = d2[skip_samples:] if skip_samples < len(d2) else np.array([], dtype=ANALYSIS_DTYPE)
 
         if len(d1_coarse) < min_samples or len(d2_coarse) < min_samples:
             d1_coarse = d1
@@ -305,10 +359,10 @@ class AudioAnalyzer:
         emphasis = cfg.emphasis_signal_weight * np.abs(x_filtered) + cfg.emphasis_diff_weight * np.abs(dx)
 
         smooth = max(8, int(rate * smooth_ms / 1000.0))
-        kernel = np.ones(smooth, dtype=np.float64) / smooth
+        kernel = np.full(smooth, ANALYSIS_DTYPE(1.0 / smooth), dtype=ANALYSIS_DTYPE)
 
         # FFT tabanlı konvolüsyon — büyük dizilerde ~O(n log n)
-        env = fftconvolve(emphasis, kernel, mode="same")
+        env = np.asarray(fftconvolve(emphasis, kernel, mode="same"), dtype=ANALYSIS_DTYPE)
         env = np.log1p(env * cfg.envelope_gain)
 
         hop = max(1, int(rate * hop_ms / 1000.0))
@@ -323,9 +377,9 @@ class AudioAnalyzer:
         if std > 1e-9:
             feat = feat / std
         else:
-            feat = feat * 0.0
+            feat = feat * ANALYSIS_DTYPE(0.0)
 
-        return feat.astype(np.float64), rate / hop
+        return feat.astype(ANALYSIS_DTYPE, copy=False), rate / hop
 
     def _segment_validation(
         self,

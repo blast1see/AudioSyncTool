@@ -8,11 +8,15 @@ Deew hakkında: https://github.com/pcroland/deew
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from functools import lru_cache
+import importlib.util
 import os
 import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import warnings
 from pathlib import Path
@@ -28,6 +32,16 @@ from audio_sync.config import (
     DEEW_DEFAULT_BITRATES,
     resolve_tool,
 )
+from audio_sync.core.process_runner import run_text_process
+
+
+@dataclass(frozen=True)
+class DeewBackend:
+    """Resolved deew backend command prefix and environment."""
+
+    command_prefix: tuple[str, ...]
+    display_name: str
+    env: dict[str, str] | None = None
 
 
 # ── Deew Yol Bulma ──────────────────────────────────────────────────────────
@@ -69,6 +83,138 @@ def _find_deew_executable() -> str | None:
     return None
 
 
+def _find_vendored_deew_module() -> str | None:
+    """Return the optional vendored deew package root if present."""
+    project_root = Path(__file__).resolve().parent.parent.parent
+    vendor_root = project_root / "vendor" / "deew_pkg"
+    if (vendor_root / "deew").is_dir():
+        return str(vendor_root)
+    return None
+
+
+def _find_python_deew_backend() -> DeewBackend | None:
+    """Return a Python-backed deew command if the module is importable."""
+    vendored_root = _find_vendored_deew_module()
+    if vendored_root is not None:
+        vendored_launcher = Path(vendored_root) / "bin" / "deew.exe"
+        env = os.environ.copy()
+        existing_pythonpath = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = (
+            f"{vendored_root}{os.pathsep}{existing_pythonpath}"
+            if existing_pythonpath else vendored_root
+        )
+        return DeewBackend(
+            command_prefix=((str(vendored_launcher),) if vendored_launcher.is_file()
+                            else (sys.executable, "-m", "deew")),
+            display_name=(
+                str(vendored_launcher) if vendored_launcher.is_file()
+                else "python -m deew (vendored)"
+            ),
+            env=env,
+        )
+
+    if importlib.util.find_spec("deew") is not None:
+        return DeewBackend(
+            command_prefix=(sys.executable, "-m", "deew"),
+            display_name="python -m deew",
+        )
+
+    return None
+
+
+def _build_temp_env(base_env: dict[str, str] | None, work_dir: str) -> dict[str, str]:
+    """Build an environment with a forced writable temp directory."""
+    env = os.environ.copy()
+    if base_env:
+        env.update(base_env)
+    env.update({
+        "TMP": work_dir,
+        "TEMP": work_dir,
+        "TMPDIR": work_dir,
+    })
+    return env
+
+
+@lru_cache(maxsize=8)
+def _probe_backend_runtime(
+    command_prefix: tuple[str, ...],
+    display_name: str,
+    env_signature: tuple[tuple[str, str], ...] | None = None,
+) -> tuple[bool, str]:
+    """Return whether a deew backend can actually start."""
+    probe_root = Path(__file__).resolve().parent.parent.parent / ".deew_probe"
+    probe_root.mkdir(exist_ok=True)
+
+    try:
+        result = run_text_process(
+            [*command_prefix, "-c"],
+            timeout=15,
+            not_found_message=f"{display_name} not found.",
+            timeout_message=f"{display_name} probe timed out.",
+            cwd=str(probe_root),
+            env=_build_temp_env(dict(env_signature) if env_signature else None, str(probe_root)),
+        )
+    except Exception as exc:
+        return False, str(exc)
+
+    if result.returncode == 0:
+        return True, display_name
+
+    stderr = (result.stderr or "").strip()
+    stdout = (result.stdout or "").strip()
+    detail = stderr or stdout or f"{display_name} returned exit code {result.returncode}."
+    return False, detail
+
+
+def resolve_deew_backend() -> DeewBackend:
+    """Resolve the first deew backend that can actually start."""
+    errors: list[str] = []
+
+    deew_path = _find_deew_executable()
+    if deew_path is not None:
+        ok, detail = _probe_backend_runtime((deew_path,), deew_path)
+        if ok:
+            return DeewBackend(command_prefix=(deew_path,), display_name=deew_path)
+        errors.append(f"standalone deew failed runtime probe: {detail}")
+
+    python_backend = _find_python_deew_backend()
+    if python_backend is not None:
+        env_signature = (
+            tuple(sorted(python_backend.env.items()))
+            if python_backend.env is not None else None
+        )
+        ok, detail = _probe_backend_runtime(
+            python_backend.command_prefix,
+            python_backend.display_name,
+            env_signature,
+        )
+        if ok:
+            return python_backend
+        errors.append(f"python deew failed runtime probe: {detail}")
+
+    detail_block = "\n".join(f"  - {msg}" for msg in errors) if errors else "  - no backend found"
+    raise OSError(
+        "'deew' is configured but could not be started correctly.\n"
+        "\n"
+        "Tried backends:\n"
+        f"{detail_block}\n"
+        "\n"
+        "Recommended fixes:\n"
+        "  1. Install the Python package: pip install deew\n"
+        "  2. Or replace the standalone deew.exe with a working release build\n"
+        "  3. Then reopen the app so the runtime probe can pass"
+    )
+
+
+def get_deew_runtime_status() -> tuple[bool, str]:
+    """Return runtime availability plus a user-facing detail string."""
+    try:
+        backend = resolve_deew_backend()
+        return True, backend.display_name
+    except OSError as exc:
+        return False, str(exc)
+
+
 # ── Deew Encoder ─────────────────────────────────────────────────────────────
 
 
@@ -91,7 +237,7 @@ class DeewEncoder:
 
     def __init__(self, config: DeewConfig = DEEW_CONFIG) -> None:
         self._config = config
-        self._deew_path: str | None = None
+        self._backend: DeewBackend | None = None
 
     # ── Bağımlılık Kontrolü ──────────────────────────────────────────────
 
@@ -144,6 +290,7 @@ class DeewEncoder:
         drc: DeewDRC | None = None,
         dialnorm: int | None = None,
         progress_callback: Callable[[str], None] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> str:
         """WAV dosyasını deew ile AC3/EAC3 formatına dönüştürür.
 
@@ -165,8 +312,8 @@ class DeewEncoder:
             FileNotFoundError: Giriş dosyası bulunamazsa.
             RuntimeError: Encoding hatası.
         """
-        # Deew yolunu bul
-        deew_path = self.check_availability()
+        # Deew backend'ini çöz
+        backend = resolve_deew_backend()
 
         # Giriş dosyasını doğrula
         if not os.path.isfile(input_wav):
@@ -193,7 +340,7 @@ class DeewEncoder:
 
         # Komutu oluştur
         cmd = self._build_command(
-            deew_path=deew_path,
+            command_prefix=backend.command_prefix,
             input_wav=input_wav,
             output_dir=output_dir,
             fmt=effective_fmt,
@@ -207,7 +354,13 @@ class DeewEncoder:
             progress_callback(f"Deew komutu: {' '.join(shlex.quote(c) for c in cmd)}")
 
         # Komutu çalıştır
-        result = self._run_deew(cmd)
+        result = self._run_deew(
+            cmd,
+            timeout=self._config.timeout_sec,
+            cancel_event=cancel_event,
+            work_dir=output_dir,
+            base_env=backend.env,
+        )
 
         if progress_callback:
             if result.stdout:
@@ -237,7 +390,7 @@ class DeewEncoder:
 
     @staticmethod
     def _build_command(
-        deew_path: str,
+        command_prefix: tuple[str, ...],
         input_wav: str,
         output_dir: str,
         fmt: DeewFormat,
@@ -252,7 +405,7 @@ class DeewEncoder:
             Komut ve argüman listesi.
         """
         cmd = [
-            deew_path,
+            *command_prefix,
             "-i", input_wav,
             "-o", output_dir,
             "-f", fmt.cli_value,
@@ -270,7 +423,14 @@ class DeewEncoder:
         return cmd
 
     @staticmethod
-    def _run_deew(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    def _run_deew(
+        cmd: list[str],
+        *,
+        timeout: int,
+        cancel_event: threading.Event | None = None,
+        work_dir: str | None = None,
+        base_env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         """Deew komutunu çalıştırır.
 
         Args:
@@ -283,26 +443,23 @@ class DeewEncoder:
             RuntimeError: Zaman aşımı durumunda.
             OSError: Komut bulunamazsa.
         """
-        kwargs: dict = dict(
-            capture_output=True,
-            text=True,
-            timeout=600,  # 10 dakika timeout
-        )
-        if sys.platform == "win32":
-            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+        env = _build_temp_env(base_env, work_dir) if work_dir else (base_env or None)
 
-        try:
-            return subprocess.run(cmd, **kwargs)
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(
-                "Deew encoding did not complete within 10 minutes. "
-                "The file may be too large or deew may not be configured correctly."
-            )
-        except FileNotFoundError:
-            raise OSError(
+        return run_text_process(
+            cmd,
+            timeout=timeout,
+            cancel_event=cancel_event,
+            not_found_message=(
                 f"'{cmd[0]}' could not be executed. Make sure the file exists "
                 f"and you have execution permissions."
-            )
+            ),
+            timeout_message=(
+                f"Deew encoding did not complete within {timeout} seconds. "
+                f"The file may be too large or deew may not be configured correctly."
+            ),
+            cwd=work_dir,
+            env=env,
+        )
 
     @staticmethod
     def _find_output_file(
@@ -447,6 +604,7 @@ def encode_wav_with_deew(
     dialnorm: int = 0,
     delete_wav: bool = True,
     progress_callback: Callable[[str], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> str:
     """WAV dosyasını Deew ile dönüştürür ve istenen konuma taşır.
 
@@ -479,7 +637,10 @@ def encode_wav_with_deew(
     encoder = DeewEncoder()
 
     # Deew çıktısı için geçici dizin kullan (temiz çalışma)
-    temp_dir = tempfile.mkdtemp(prefix="deew_")
+    temp_parent = os.path.dirname(final_output_path) or os.path.dirname(input_wav) or "."
+    if not os.path.isdir(temp_parent):
+        os.makedirs(temp_parent, exist_ok=True)
+    temp_dir = tempfile.mkdtemp(prefix="deew_", dir=temp_parent)
 
     try:
         if progress_callback:
@@ -495,6 +656,7 @@ def encode_wav_with_deew(
             drc=drc,
             dialnorm=dialnorm,
             progress_callback=progress_callback,
+            cancel_event=cancel_event,
         )
 
         # Çıktıyı istenen konuma taşı

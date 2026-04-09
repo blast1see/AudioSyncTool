@@ -96,6 +96,10 @@ class AnalysisResult:
     skip_fallback: bool
 
 
+class OperationCancelledError(RuntimeError):
+    """Raised when a long-running background operation is cancelled by the user."""
+
+
 # ── İlerleme Callback Protokolü ─────────────────────────────────────────────
 
 

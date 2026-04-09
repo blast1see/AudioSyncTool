@@ -394,6 +394,7 @@ class DeewConfig:
     drc: DeewDRC = DeewDRC.MUSIC_LIGHT
     dialnorm: int = 0
     delete_intermediate_wav: bool = True
+    timeout_sec: int = 600
 
 
 # ── Deew Bitrate Tabloları ───────────────────────────────────────────────────
@@ -548,6 +549,7 @@ class QaacConfig:
     cbr_bitrate: int = 256          # kbps for CBR
     he_aac: bool = False            # Use HE-AAC profile
     no_delay: bool = True           # --no-delay flag
+    timeout_sec: int = 600
 
 
 # ── Varsayılan Örnekler ─────────────────────────────────────────────────────
