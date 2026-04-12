@@ -6,6 +6,20 @@
 
 ## English
 
+### [2.2.4] - 2026-04-13
+
+#### Changed
+- **Lighter analysis startup**: analyzer imports are deferred so app startup avoids loading heavy analysis code too early
+- **Shared process runner**: FFmpeg, qaac, and Deew jobs now use a common cancellation-aware subprocess path
+- **Lower analysis overhead**: mono decode and analyzer preparation now avoid some unnecessary copies and repeated work
+- **Deew runtime preflight**: the app checks whether Deew can actually start before launching a Deew encode job
+- **Build config cleanup**: PyInstaller build settings are now centralized in `build_support.py`
+
+#### Verified
+- **Compile smoke test**: `python -m compileall audio_sync` completed successfully
+- **Real-environment Deew probe**: verified that the configured standalone `deew` can start on Windows
+- **Real-environment Deew encode smoke test**: verified a short `.wav -> .eac3` encode in the real Windows environment
+
 ### [2.2.3] - 2026-04-07
 
 #### Changed
@@ -132,6 +146,20 @@
 
 ## Turkce
 
+### [2.2.4] - 2026-04-13
+
+#### Degisenler
+- **Daha hafif analiz acilisi**: analyzer importlari ertelenerek uygulama acilisinda agir analiz kodlarinin erkenden yuklenmesi engellendi
+- **Ortak process runner**: FFmpeg, qaac ve Deew isleri artik iptal farkindalikli ortak bir subprocess yolunu kullaniyor
+- **Daha dusuk analiz yuku**: mono decode ve analyzer hazirligi sirasinda gereksiz kopyalar ve tekrar eden isler azaltildi
+- **Deew runtime on kontrolu**: uygulama, Deew encode isi baslamadan once Deew'in gercekten calisabildigini denetliyor
+- **Build ayari temizligi**: PyInstaller derleme ayarlari `build_support.py` altinda merkezilestirildi
+
+#### Dogrulama
+- **Compile smoke testi**: `python -m compileall audio_sync` basariyla tamamlandi
+- **Gercek ortam Deew probe testi**: Windows uzerinde ayarli standalone `deew` aracinin calisabildigi dogrulandi
+- **Gercek ortam Deew encode smoke testi**: gercek Windows ortaminda kisa bir `.wav -> .eac3` kodlamasi dogrulandi
+
 ### [2.2.3] - 2026-04-07
 
 #### Degisenler
@@ -253,6 +281,7 @@
 - Onceden derlenmis Windows EXE dagitimi
 - MIT Lisansi
 
+[2.2.4]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.3...v2.2.4
 [2.2.3]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.2...v2.2.3
 [2.2.2]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.1...v2.2.2
 [2.2.1]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.0...v2.2.1
