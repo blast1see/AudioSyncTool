@@ -1,44 +1,46 @@
-# Audio Sync Tool v2.2.3
+# Audio Sync Tool v2.2.4
 
 ## What's New / Yenilikler
 
-### Encoding pipeline cleanup
-- Deew is now a Deew-only pipeline with no FFmpeg encoder switch inside that panel
-- AC3 and EAC3 output options were moved into the FFmpeg pipeline
-- FFmpeg AC3/EAC3 output now has bitrate and channel layout controls in the correct place
+### Performance and reliability improvements
+- Analysis startup is lighter thanks to a lazier analyzer import path
+- Long-running FFmpeg, qaac, and Deew jobs now share a safer cancellation/process runner path
+- The analysis flow reuses more work and avoids unnecessary PCM copying during mono decode
+- The app now validates that Deew can actually start before a Deew job begins
 
 ### Verification
-- UI smoke test confirmed the old Deew-side encoder selector is gone
-- UI smoke test confirmed AC3/EAC3 controls now appear under the FFmpeg pipeline
-- FFmpeg AC3 and EAC3 output creation was smoke-tested successfully after the refactor
+- `python -m compileall audio_sync` passed
+- Real Windows-environment Deew runtime probe passed
+- Real Windows-environment short `.wav -> .eac3` Deew smoke encode passed
 
 ### Release contents
-- Updated Windows executable for v2.2.3
+- Updated Windows executable for v2.2.4
 - Refreshed changelog, release notes, and README release badge
 
 ---
 
 ## Turkce
 
-### Kodlama pipeline temizligi
-- Deew artik kendi panelinde yalnizca Deew kullanan bir pipeline; bu panelde FFmpeg encoder secimi kaldirildi
-- AC3 ve EAC3 cikti secenekleri FFmpeg pipeline altina tasindi
-- FFmpeg AC3/EAC3 ciktilarina dogru yerde bitrate ve kanal duzeni kontrolleri eklendi
+### Performans ve guvenilirlik iyilestirmeleri
+- Analyzer import yolu daha tembel hale getirilerek acilis yukü hafifletildi
+- Uzun suren FFmpeg, qaac ve Deew islemleri daha guvenli ortak bir iptal/process runner akisini kullaniyor
+- Analiz akisi mono decode sirasinda gereksiz PCM kopyalarini azaltacak sekilde iyilestirildi
+- Deew isleri baslamadan once Deew'in gercekten calisabildigi dogrulaniyor
 
 ### Dogrulama
-- UI smoke testi, Deew tarafindaki eski encoder seciminin kalktigini dogruladi
-- UI smoke testi, AC3/EAC3 kontrollerinin artik FFmpeg pipeline altinda gorundugunu dogruladi
-- FFmpeg AC3 ve EAC3 ciktilari refactor sonrasinda basariyla smoke test edildi
+- `python -m compileall audio_sync` basariyla gecti
+- Gercek Windows ortaminda Deew runtime probe basariyla gecti
+- Gercek Windows ortaminda kisa `.wav -> .eac3` Deew smoke encode basariyla gecti
 
 ### Release icerigi
-- Windows `exe` dosyasi v2.2.3 icin guncellendi
+- Windows `exe` dosyasi v2.2.4 icin guncellendi
 - Changelog, release notes ve README release badge yenilendi
 
 ---
 
 ## Installation / Kurulum
 
-**Windows**: Download `AudioSyncTool-v2.2.3-win64.zip` from the assets below.
+**Windows**: Download `AudioSyncTool-v2.2.4-win64.zip` from the assets below.
 
 **From source**:
 ```bash
