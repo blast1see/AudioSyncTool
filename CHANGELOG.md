@@ -6,6 +6,18 @@
 
 ## English
 
+### [2.2.5] - 2026-04-13
+
+#### Changed
+- **AudioAlign-inspired sync refinement**: fingerprint anchors now guide a local offset-map refinement pass instead of relying on a single coarse lag guess
+- **Stronger final lag selection**: weak windows no longer drag the final sync point away from the dominant lag cluster
+- **Lower-RAM analysis path**: the GUI analysis flow now runs against disk-backed mono PCM buffers rather than loading full decoded arrays into memory
+
+#### Verified
+- **Devil's Advocate validation**: the tested English/Turkish pair now resolves to about `+1990.37 ms`, closely matching AudioAlign's `+1996 ms`
+- **Self-self regression**: `THD` and `DTS-HD` self-self tests both returned `0.0 ms`
+- **Cross-title smoke test**: a separate John Wick TR/EN excerpt test remained stable at about `+192.73 ms`
+
 ### [2.2.4] - 2026-04-13
 
 #### Changed
@@ -146,6 +158,18 @@
 
 ## Turkce
 
+### [2.2.5] - 2026-04-13
+
+#### Degisenler
+- **AudioAlign benzeri senkron refinement**: fingerprint anchor'lar artik tek bir kaba lag tahmini yerine yerel offset-haritasi refinement gecisine yol gosteriyor
+- **Daha guclu final lag secimi**: zayif pencereler artik nihai senkron noktasini baskin lag kumesinden uzaklastiramiyor
+- **Daha dusuk RAM kullanan analiz yolu**: GUI analiz akisi tam decode edilmis dizileri bellekte tutmak yerine diskteki mono PCM tamponlari uzerinden calisiyor
+
+#### Dogrulama
+- **Devil's Advocate dogrulamasi**: test edilen English/Turkish cift artik yaklasik `+1990.37 ms` sonucunu veriyor; bu deger AudioAlign'deki `+1996 ms` sonucuna cok yakin
+- **Self-self regresyonu**: `THD` ve `DTS-HD` self-self testleri `0.0 ms` verdi
+- **Farkli eser smoke testi**: ayri bir John Wick TR/EN excerpt testi yaklasik `+192.73 ms` ile stabil kaldi
+
 ### [2.2.4] - 2026-04-13
 
 #### Degisenler
@@ -281,6 +305,7 @@
 - Onceden derlenmis Windows EXE dagitimi
 - MIT Lisansi
 
+[2.2.5]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.4...v2.2.5
 [2.2.4]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.3...v2.2.4
 [2.2.3]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.2...v2.2.3
 [2.2.2]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.1...v2.2.2

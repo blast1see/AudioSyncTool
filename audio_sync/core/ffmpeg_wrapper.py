@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import warnings
 from typing import Protocol
@@ -295,10 +296,7 @@ class FFmpegWrapper:
         sample_rate: int | None = None,
         cancel_event: threading.Event | None = None,
     ) -> tuple[int, np.ndarray]:
-        """Decode audio to mono 16-bit PCM in memory for analysis.
-
-        This avoids creating temporary WAV files during delay analysis.
-        """
+        """Decode audio to mono 16-bit PCM in memory for analysis."""
         analysis_rate = sample_rate or self._config.analysis_sample_rate
         cmd = [
             resolve_tool("ffmpeg"),
@@ -330,7 +328,6 @@ class FFmpegWrapper:
         if not pcm_bytes:
             raise RuntimeError("Mono decode returned no audio samples.")
 
-        # int16 PCM must have an even byte count.
         if len(pcm_bytes) % 2 != 0:
             pcm_bytes = pcm_bytes[:-1]
 
@@ -339,6 +336,63 @@ class FFmpegWrapper:
             raise RuntimeError("Mono decode returned an empty PCM buffer.")
 
         return analysis_rate, pcm
+
+    def decode_mono_pcm_to_file(
+        self,
+        src: str,
+        sample_rate: int | None = None,
+        cancel_event: threading.Event | None = None,
+        *,
+        prefix: str = "audiosync_pcm_",
+        temp_dir: str | None = None,
+    ) -> tuple[int, str, int]:
+        """Decode audio to mono 16-bit PCM on disk for lower-RAM analysis."""
+        analysis_rate = sample_rate or self._config.analysis_sample_rate
+        fd, out_path = tempfile.mkstemp(
+            suffix=".s16le",
+            prefix=prefix,
+            dir=temp_dir,
+        )
+        os.close(fd)
+
+        cmd = [
+            resolve_tool("ffmpeg"),
+            "-v", "error",
+            "-nostdin",
+            "-y",
+            "-i", src,
+            "-vn",
+            "-sn",
+            "-dn",
+            "-ar", str(analysis_rate),
+            "-ac", "1",
+            "-acodec", "pcm_s16le",
+            "-f", "s16le",
+            out_path,
+        ]
+        try:
+            result = self._run_command(
+                cmd,
+                timeout=self._get_ffmpeg_timeout(src),
+                cancel_event=cancel_event,
+            )
+            if result.returncode != 0:
+                stderr_tail = result.stderr[-400:] if result.stderr else "(stderr empty)"
+                raise RuntimeError(f"Mono decode error:\n{stderr_tail}")
+
+            byte_count = os.path.getsize(out_path)
+            sample_count = byte_count // np.dtype(np.int16).itemsize
+            if sample_count <= 0:
+                raise RuntimeError("Mono decode returned no audio samples.")
+
+            return analysis_rate, out_path, sample_count
+        except Exception:
+            if os.path.isfile(out_path):
+                try:
+                    os.remove(out_path)
+                except OSError:
+                    pass
+            raise
 
     # ── FPS Dönüşümü ────────────────────────────────────────────────────
 
