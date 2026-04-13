@@ -9,14 +9,10 @@
 ### [2.2.5] - 2026-04-13
 
 #### Changed
-- **AudioAlign-inspired sync refinement**: fingerprint anchors now guide a local offset-map refinement pass instead of relying on a single coarse lag guess
+- **Fingerprint anchor-based sync refinement**: fingerprint anchors now guide a local offset-map refinement pass instead of relying on a single coarse lag guess
 - **Stronger final lag selection**: weak windows no longer drag the final sync point away from the dominant lag cluster
 - **Lower-RAM analysis path**: the GUI analysis flow now runs against disk-backed mono PCM buffers rather than loading full decoded arrays into memory
-
-#### Verified
-- **Devil's Advocate validation**: the tested English/Turkish pair now resolves to about `+1990.37 ms`, closely matching AudioAlign's `+1996 ms`
-- **Self-self regression**: `THD` and `DTS-HD` self-self tests both returned `0.0 ms`
-- **Cross-title smoke test**: a separate John Wick TR/EN excerpt test remained stable at about `+192.73 ms`
+- **More stable difficult-match handling**: final sync-point selection is now less sensitive to weak outlier windows
 
 ### [2.2.4] - 2026-04-13
 
@@ -27,21 +23,12 @@
 - **Deew runtime preflight**: the app checks whether Deew can actually start before launching a Deew encode job
 - **Build config cleanup**: PyInstaller build settings are now centralized in `build_support.py`
 
-#### Verified
-- **Compile smoke test**: `python -m compileall audio_sync` completed successfully
-- **Real-environment Deew probe**: verified that the configured standalone `deew` can start on Windows
-- **Real-environment Deew encode smoke test**: verified a short `.wav -> .eac3` encode in the real Windows environment
-
 ### [2.2.3] - 2026-04-07
 
 #### Changed
 - **Encoding pipeline separation**: the Deew pipeline is now Deew-only and no longer exposes an FFmpeg encoder switch
 - **FFmpeg AC3/EAC3 outputs moved**: AC3 and EAC3 output options now live under the FFmpeg pipeline where they belong
 - **FFmpeg surround controls**: AC3/EAC3 encoding in the FFmpeg pipeline now includes bitrate and channel layout controls
-
-#### Verified
-- **UI smoke test**: confirmed the old Deew-side encoder selector is gone and AC3/EAC3 controls appear under FFmpeg
-- **FFmpeg encode smoke test**: verified successful AC3 and EAC3 output creation after the pipeline refactor
 
 ### [2.2.2] - 2026-04-05
 
@@ -52,7 +39,6 @@
 
 #### Changed
 - **Deew-only wording cleanup**: removed `Dolby` / `DEE` mentions from the app text and public docs to reduce branding/licensing risk
-- **Verified encode paths**: FFmpeg AC3/EAC3 output and Deew AC3/EAC3 output were smoke-tested on Windows
 
 ### [2.2.1] - 2026-04-05
 
@@ -161,14 +147,10 @@
 ### [2.2.5] - 2026-04-13
 
 #### Degisenler
-- **AudioAlign benzeri senkron refinement**: fingerprint anchor'lar artik tek bir kaba lag tahmini yerine yerel offset-haritasi refinement gecisine yol gosteriyor
+- **Fingerprint anchor tabanli senkron refinement**: fingerprint anchor'lar artik tek bir kaba lag tahmini yerine yerel offset-haritasi refinement gecisine yol gosteriyor
 - **Daha guclu final lag secimi**: zayif pencereler artik nihai senkron noktasini baskin lag kumesinden uzaklastiramiyor
 - **Daha dusuk RAM kullanan analiz yolu**: GUI analiz akisi tam decode edilmis dizileri bellekte tutmak yerine diskteki mono PCM tamponlari uzerinden calisiyor
-
-#### Dogrulama
-- **Devil's Advocate dogrulamasi**: test edilen English/Turkish cift artik yaklasik `+1990.37 ms` sonucunu veriyor; bu deger AudioAlign'deki `+1996 ms` sonucuna cok yakin
-- **Self-self regresyonu**: `THD` ve `DTS-HD` self-self testleri `0.0 ms` verdi
-- **Farkli eser smoke testi**: ayri bir John Wick TR/EN excerpt testi yaklasik `+192.73 ms` ile stabil kaldi
+- **Zor eslesmelerde daha kararlı secim**: nihai senkron noktasi secimi artik zayif aykiri pencerelere daha az duyarlı
 
 ### [2.2.4] - 2026-04-13
 
@@ -179,21 +161,12 @@
 - **Deew runtime on kontrolu**: uygulama, Deew encode isi baslamadan once Deew'in gercekten calisabildigini denetliyor
 - **Build ayari temizligi**: PyInstaller derleme ayarlari `build_support.py` altinda merkezilestirildi
 
-#### Dogrulama
-- **Compile smoke testi**: `python -m compileall audio_sync` basariyla tamamlandi
-- **Gercek ortam Deew probe testi**: Windows uzerinde ayarli standalone `deew` aracinin calisabildigi dogrulandi
-- **Gercek ortam Deew encode smoke testi**: gercek Windows ortaminda kisa bir `.wav -> .eac3` kodlamasi dogrulandi
-
 ### [2.2.3] - 2026-04-07
 
 #### Degisenler
 - **Kodlama pipeline ayrimi**: Deew pipeline artik yalnizca Deew kullaniyor ve FFmpeg encoder secimi gostermiyor
 - **FFmpeg AC3/EAC3 ciktilari tasindi**: AC3 ve EAC3 cikti secenekleri artik dogru yerde, FFmpeg pipeline altinda bulunuyor
 - **FFmpeg surround kontrolleri**: FFmpeg pipeline icindeki AC3/EAC3 kodlamasina bitrate ve kanal duzeni kontrolleri eklendi
-
-#### Dogrulama
-- **UI smoke testi**: Deew tarafindaki eski encoder seciminin kalktigi ve AC3/EAC3 kontrollerinin FFmpeg altinda gorundugu dogrulandi
-- **FFmpeg encode smoke testi**: pipeline refactor sonrasi AC3 ve EAC3 ciktilarinin basariyla uretildigi dogrulandi
 
 ### [2.2.2] - 2026-04-05
 
@@ -204,7 +177,6 @@
 
 #### Degisenler
 - **Yalnizca Deew odakli metin temizligi**: uygulama metinlerinden ve dokumantasyondan `Dolby` / `DEE` ifadeleri kaldirilarak marka/lisans riski azaltildi
-- **Kodlama yollarinin dogrulanmasi**: Windows uzerinde FFmpeg AC3/EAC3 ciktilari ve Deew AC3/EAC3 ciktilari smoke test ile dogrulandi
 
 ### [2.2.1] - 2026-04-05
 
