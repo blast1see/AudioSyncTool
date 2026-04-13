@@ -133,7 +133,7 @@
 - Cross-correlation based audio delay detection
 - 6 synchronization modes: adelay/atrim, aresample, atempo, rubberband, delay/trim, async resample
 - AC3 and EAC3 encoding via deew integration
-- FPS conversion support (23.976 <-> 25 <-> 29.97 etc.)
+- FPS conversion support (23.976 <-> 24 <-> 25)
 - Bilingual UI (Turkish / English) with runtime language switching
 - Dark-themed modern tkinter interface
 - Preserves original audio quality (bit depth, sample rate, channels)

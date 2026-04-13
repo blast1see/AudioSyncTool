@@ -40,7 +40,7 @@
 - **AC3 and EAC3 encoding** — via FFmpeg or [deew](https://github.com/pcroland/deew)
 - **AAC encoding** — via FFmpeg or [qaac](https://github.com/nu774/qaac) (Apple AAC)
 - **FLAC & Opus encoding** — via FFmpeg
-- **FPS conversion** — 23.976 <-> 25 <-> 29.97 etc.
+- **FPS conversion** — 23.976 <-> 24 <-> 25
 - **Bilingual UI** — English / Turkish
 - **Dark-themed modern interface** — easy on the eyes
 - **Preserves original audio quality** — bit depth, sample rate, channels
@@ -152,9 +152,9 @@ Audio Sync Tool integrates with **[deew](https://github.com/pcroland/deew)** to 
 Audio Sync Tool can compensate for frame rate differences between video sources. When audio is extracted from a video with a different frame rate than the target, the tool adjusts the audio duration accordingly.
 
 Common conversions:
-- 23.976 fps <-> 25 fps (PAL <-> NTSC Film)
-- 23.976 fps <-> 29.97 fps
-- 25 fps <-> 29.97 fps
+- 23.976 fps <-> 24 fps
+- 23.976 fps <-> 25 fps (PAL <-> film speed-up / slow-down)
+- 24 fps <-> 25 fps
 
 ### Building EXE
 
@@ -263,7 +263,7 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed list of changes in each version.
 - **AC3 ve EAC3 kodlama** — FFmpeg veya [deew](https://github.com/pcroland/deew) aracılığıyla
 - **AAC kodlama** — FFmpeg veya [qaac](https://github.com/nu774/qaac) (Apple AAC) aracılığıyla
 - **FLAC & Opus kodlama** — FFmpeg aracılığıyla
-- **FPS dönüşümü** — 23.976 <-> 25 <-> 29.97 vb.
+- **FPS dönüşümü** — 23.976 <-> 24 <-> 25
 - **İki dilli arayüz** — İngilizce / Türkçe
 - **Karanlık temalı modern arayüz** — göz yormayan tasarım
 - **Orijinal ses kalitesini korur** — bit derinliği, örnekleme hızı, kanal sayısı
@@ -375,9 +375,9 @@ Audio Sync Tool, AC3 ve EAC3 kodlama yetenekleri sağlamak için **[deew](https:
 Audio Sync Tool, video kaynakları arasındaki kare hızı farklılıklarını telafi edebilir. Ses, hedeften farklı bir kare hızına sahip bir videodan çıkarıldığında, araç ses süresini buna göre ayarlar.
 
 Yaygın dönüşümler:
-- 23.976 fps <-> 25 fps (PAL <-> NTSC Film)
-- 23.976 fps <-> 29.97 fps
-- 25 fps <-> 29.97 fps
+- 23.976 fps <-> 24 fps
+- 23.976 fps <-> 25 fps (PAL <-> film hizlandirma / yavaslatma)
+- 24 fps <-> 25 fps
 
 ### EXE Derleme
 
