@@ -310,6 +310,31 @@ class SyncConfig:
     # Genel
     min_audio_duration_sec: int = 8
     analysis_sample_rate: int = 16000
+    analysis_chunk_sec: int = 30
+    fingerprint_enabled: bool = True
+    fingerprint_frame_size: int = 2048
+    fingerprint_hop_size: int = 512
+    fingerprint_frame_stride: int = 2
+    fingerprint_peaks_per_frame: int = 3
+    fingerprint_peak_min_distance_bins: int = 6
+    fingerprint_target_zone_frames: int = 20
+    fingerprint_fanout: int = 4
+    fingerprint_hash_bin_size: int = 2
+    fingerprint_max_hash_occurrences: int = 24
+    fingerprint_min_votes: int = 8
+    fingerprint_cluster_radius_frames: int = 2
+    fingerprint_top_clusters: int = 3
+    fingerprint_anchor_bucket_sec: float = 18.0
+    fingerprint_anchor_min_spacing_sec: float = 8.0
+    fingerprint_max_anchors: int = 18
+
+    # Yerel offset haritasi / drift takibi
+    anchor_local_search_sec: float = 2.0
+    offset_map_local_search_sec: float = 1.0
+    offset_map_bucket_sec: float = 18.0
+    offset_map_min_spacing_sec: float = 8.0
+    offset_map_min_points: int = 3
+    validation_refine_multiplier: int = 2
 
     # FFmpeg
     ffmpeg_timeout_sec: int = 300

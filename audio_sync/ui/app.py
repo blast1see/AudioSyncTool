@@ -52,8 +52,6 @@ from audio_sync.ui.stream_dialog import ask_stream_selection
 from audio_sync.utils import parse_float, parse_int, validate_file
 
 if TYPE_CHECKING:
-    import numpy as np
-
     from audio_sync.core.analyzer import AudioAnalyzer
 
 # Try to use tkinterdnd2 for drag & drop support
@@ -76,8 +74,10 @@ class _PreparedAnalysis:
     fps_tmp_path: str | None
     src_rate: int
     sync_rate: int
-    src_pcm: "np.ndarray"
-    sync_pcm: "np.ndarray"
+    src_pcm_path: str
+    sync_pcm_path: str
+    src_samples: int
+    sync_samples: int
 
 
 class AudioSyncApp(_TkBase):  # type: ignore[misc]
@@ -1941,19 +1941,32 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._log(decode_message)
         self._set_progress(decode_start_progress)
         decode_started = time.perf_counter()
-        src_rate, src_pcm = self._ffmpeg.decode_mono_pcm(
-            src_path,
-            cancel_event=self._cancel_event,
-        )
-        self._set_progress(src_decoded_progress)
-        self._check_cancelled()
-        sync_rate, sync_pcm = self._ffmpeg.decode_mono_pcm(
-            effective_sync_path,
-            cancel_event=self._cancel_event,
-        )
-        self._set_progress(sync_decoded_progress)
-        self._log_timing(decode_message, decode_started)
-        self._check_cancelled()
+        src_pcm_path: str | None = None
+        sync_pcm_path: str | None = None
+        try:
+            src_rate, src_pcm_path, src_samples = self._ffmpeg.decode_mono_pcm_to_file(
+                src_path,
+                cancel_event=self._cancel_event,
+                prefix="audiosync_src_pcm_",
+            )
+            self._set_progress(src_decoded_progress)
+            self._check_cancelled()
+            sync_rate, sync_pcm_path, sync_samples = self._ffmpeg.decode_mono_pcm_to_file(
+                effective_sync_path,
+                cancel_event=self._cancel_event,
+                prefix="audiosync_sync_pcm_",
+            )
+            self._set_progress(sync_decoded_progress)
+            self._log_timing(decode_message, decode_started)
+            self._check_cancelled()
+        except Exception:
+            for tmp_path in (src_pcm_path, sync_pcm_path):
+                if tmp_path and os.path.isfile(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+            raise
 
         return _PreparedAnalysis(
             src_info=src_info,
@@ -1963,8 +1976,10 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             fps_tmp_path=fps_tmp_path,
             src_rate=src_rate,
             sync_rate=sync_rate,
-            src_pcm=src_pcm,
-            sync_pcm=sync_pcm,
+            src_pcm_path=src_pcm_path,
+            sync_pcm_path=sync_pcm_path,
+            src_samples=src_samples,
+            sync_samples=sync_samples,
         )
 
     def _calculate_delay_result(
@@ -1976,14 +1991,14 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         analyze_message: str,
         progress: int,
     ) -> AnalysisResult:
-        """Run the actual delay analysis on already-decoded PCM buffers."""
+        """Run the actual delay analysis on disk-backed PCM buffers."""
         self._log(analyze_message)
         self._set_progress(progress)
         analysis_started = time.perf_counter()
-        result = self._get_analyzer().calculate_delay_from_arrays(
+        result = self._get_analyzer().calculate_delay_from_pcm_files(
             prepared.src_rate,
-            prepared.src_pcm,
-            prepared.sync_pcm,
+            prepared.src_pcm_path,
+            prepared.sync_pcm_path,
             sync_rate=prepared.sync_rate,
             skip_intro_sec=skip_sec,
             total_segments=segment_count,
@@ -2030,6 +2045,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         src = self._src_path
         sync = self._sync_path
         fps_tmp_path: str | None = None
+        src_pcm_path: str | None = None
+        sync_pcm_path: str | None = None
 
         try:
             self._log(t("analyze_started"))
@@ -2065,6 +2082,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                 ),
             )
             fps_tmp_path = prepared.fps_tmp_path
+            src_pcm_path = prepared.src_pcm_path
+            sync_pcm_path = prepared.sync_pcm_path
 
             skip_sec = parse_float(
                 self.skip_intro_var.get(), default=120.0, minimum=0.0, maximum=3600.0,
@@ -2130,11 +2149,12 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             import traceback
             self._log(traceback.format_exc())
         finally:
-            if fps_tmp_path and os.path.isfile(fps_tmp_path):
-                try:
-                    os.remove(fps_tmp_path)
-                except OSError:
-                    pass
+            for tmp_path in (fps_tmp_path, src_pcm_path, sync_pcm_path):
+                if tmp_path and os.path.isfile(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
 
             def _restore() -> None:
                 with self._processing_lock:
@@ -2340,6 +2360,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
     ) -> None:
         """Arka plan thread'inde senkronizasyon işlemini yürütür."""
         fps_tmp_path: str | None = None
+        src_pcm_path: str | None = None
+        sync_pcm_path: str | None = None
         wav_out_path: str | None = None  # Deew encoding ara WAV dosyası
         needs_encoding: bool = False
         out_path_preexisting = os.path.exists(out_path)
@@ -2368,6 +2390,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                 ),
             )
             fps_tmp_path = prepared.fps_tmp_path
+            src_pcm_path = prepared.src_pcm_path
+            sync_pcm_path = prepared.sync_pcm_path
             self._log(t("log_sync_mode", mode=sync_mode.display_name))
 
             result = self._calculate_delay_result(
@@ -2568,7 +2592,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                 except OSError:
                     pass
         finally:
-            for tmp_path in (fps_tmp_path, wav_out_path):
+            for tmp_path in (fps_tmp_path, src_pcm_path, sync_pcm_path, wav_out_path):
                 if tmp_path is not None and tmp_path != out_path and os.path.isfile(tmp_path):
                     try:
                         os.remove(tmp_path)
