@@ -8,6 +8,8 @@
 
 ### Unreleased
 
+### [2.2.6] - 2026-07-21
+
 #### Added
 - Testable `SyncPipeline` orchestration with atomic output commits and synchronized WAV recovery on encoding failure
 - Automated unit, integration, GUI smoke, lint, coverage, dependency, and Windows build checks
@@ -162,6 +164,8 @@
 
 ### Unreleased
 
+### [2.2.6] - 2026-07-21
+
 #### Eklenenler
 - Atomik cikti tamamlama ve kodlama hatasinda senkron WAV kurtarma destekli, test edilebilir `SyncPipeline` is akisi
 - Otomatik birim, entegrasyon, GUI smoke, lint, coverage, bagimlilik ve Windows build kontrolleri
@@ -309,6 +313,8 @@
 - Onceden derlenmis Windows EXE dagitimi
 - MIT Lisansi
 
+[Unreleased]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.6...HEAD
+[2.2.6]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.5...v2.2.6
 [2.2.5]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.4...v2.2.5
 [2.2.4]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.3...v2.2.4
 [2.2.3]: https://github.com/blast1see/AudioSyncTool/compare/v2.2.2...v2.2.3
