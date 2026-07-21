@@ -1,8 +1,8 @@
 """ICO dosyası oluşturma betiği."""
-import struct
-import zlib
 import math
 import os
+import struct
+import zlib
 
 
 def create_png(w, h, px):

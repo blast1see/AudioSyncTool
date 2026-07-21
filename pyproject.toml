@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "audio-sync-tool"
+version = "2.2.5"
+description = "Desktop audio delay analysis and synchronization tool"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "blast1see" }]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6",
+    "ruff>=0.11",
+]
+build = ["pyinstaller>=6.12"]
+drag-drop = ["tkinterdnd2>=0.4"]
+
+[project.gui-scripts]
+audio-sync-tool = "audio_sync.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["audio_sync"]
+
+[tool.pytest.ini_options]
+minversion = "8.3"
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+markers = [
+    "integration: requires working FFmpeg and FFprobe binaries",
+    "gui: requires a graphical display (Xvfb on Linux)",
+]
+
+[tool.coverage.run]
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    '\.\.\.$',
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B"]
+ignore = ["B905"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["B011"]

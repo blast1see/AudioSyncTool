@@ -35,13 +35,16 @@ class QaacEncoder:
             return False, str(exc)
 
         try:
-            subprocess.run(
+            result = subprocess.run(
                 [binary, "--check"],
                 capture_output=True,
                 text=True,
                 timeout=10,
                 **_PLATFORM_SUBPROCESS_KWARGS,
             )
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout or "").strip()
+                return False, detail or f"qaac check failed with exit code {result.returncode}."
             return True, f"{binary} is available."
         except FileNotFoundError:
             return False, (

@@ -78,8 +78,8 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Always force output to 48 kHz",
     },
     "force_48k_note": {
-        "tr": "Not: Zorla kapalıysa yalnızca girişlerden biri 48 kHz değilse 48 kHz'e çevirir.",
-        "en": "Note: If disabled, converts to 48 kHz only when one input is not 48 kHz.",
+        "tr": "Not: Zorla kapalıysa senkronize edilen sesin örnekleme oranı korunur.",
+        "en": "Note: If disabled, the synchronized audio's sample rate is preserved.",
     },
 
     # ── Senkronizasyon Modu ──

@@ -17,9 +17,9 @@ import sys
 from build_support import (
     ENTRY_SCRIPT,
     ICON_PATH,
-    PYINSTALLER_PATHEX,
     PYINSTALLER_EXCLUDES,
     PYINSTALLER_HIDDENIMPORTS,
+    PYINSTALLER_PATHEX,
     build_environment_warning,
 )
 

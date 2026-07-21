@@ -11,8 +11,17 @@ build/
 # Virtual environments
 venv/
 .venv/
+.venv*/
+.uv-cache/
 env/
 .env/
+
+# Test / quality artifacts
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+.ruff_cache/
 
 # IDE
 .vscode/
