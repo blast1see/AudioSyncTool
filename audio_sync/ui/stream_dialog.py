@@ -5,7 +5,7 @@ from __future__ import annotations
 import tkinter as tk
 from typing import Optional
 
-from audio_sync.config import THEME, FONTS
+from audio_sync.config import FONTS, THEME
 from audio_sync.i18n import t
 
 

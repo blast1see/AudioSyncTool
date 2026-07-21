@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality and coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m ruff check .
+      - run: python -m compileall -q audio_sync tests
+      - name: Safety-critical coverage
+        run: >-
+          python -m pytest -m "not integration and not gui"
+          --cov=audio_sync.config
+          --cov=audio_sync.utils
+          --cov=audio_sync.core.models
+          --cov=audio_sync.core.process_runner
+          --cov=audio_sync.core.pipeline
+          --cov-report=term-missing
+          --cov-report=xml
+          --cov-fail-under=80
+
+  unit:
+    name: Unit (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.10"
+          - os: ubuntu-latest
+            python: "3.12"
+          - os: ubuntu-latest
+            python: "3.14"
+          - os: windows-latest
+            python: "3.14"
+          - os: macos-latest
+            python: "3.14"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -m "not integration and not gui"
+
+  ffmpeg-integration:
+    name: FFmpeg integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y ffmpeg
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -m integration
+
+  gui-smoke:
+    name: GUI smoke (Xvfb)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y xvfb python3-tk
+      - run: python -m pip install -e ".[dev]"
+      - run: xvfb-run -a python -m pytest -m gui
+
+  windows-build:
+    name: Windows executable
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+      - run: python -m pip install -e ".[build]"
+      - run: python setup.py
+      - shell: pwsh
+        run: |
+          if (-not (Test-Path dist/AudioSyncTool.exe)) {
+            throw "AudioSyncTool.exe was not created"
+          }
+          if ((Get-Item dist/AudioSyncTool.exe).Length -le 0) {
+            throw "AudioSyncTool.exe is empty"
+          }
