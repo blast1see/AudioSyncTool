@@ -7,7 +7,12 @@ import tkinter as tk
 from tkinter import filedialog
 from typing import Callable
 
-from audio_sync.config import THEME, FONTS, SUPPORTED_AUDIO_EXTENSIONS, ALL_SUPPORTED_EXTENSIONS_LIST
+from audio_sync.config import (
+    ALL_SUPPORTED_EXTENSIONS_LIST,
+    FONTS,
+    SUPPORTED_AUDIO_EXTENSIONS,
+    THEME,
+)
 from audio_sync.i18n import t
 from audio_sync.utils import short_name
 

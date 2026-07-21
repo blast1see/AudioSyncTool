@@ -13,24 +13,22 @@ import subprocess
 import sys
 import tempfile
 import threading
-import warnings
 from typing import Protocol
 
 import numpy as np
 
 from audio_sync.config import (
     CODEC_EXTENSION_MAP,
+    SYNC_CONFIG,
     DeewFormat,
     FpsConversion,
     PcmCodec,
     SyncConfig,
     SyncMode,
-    SYNC_CONFIG,
     resolve_tool,
 )
-from audio_sync.core.models import AudioInfo, OutputSampleRate
+from audio_sync.core.models import AudioInfo, AudioProbeError, OutputSampleRate
 from audio_sync.core.process_runner import run_binary_process, run_text_process
-
 
 # ── Komut Çalıştırıcı Protokolü ─────────────────────────────────────────────
 
@@ -108,15 +106,25 @@ class FFmpegWrapper:
         """
         for tool in ("ffmpeg", "ffprobe"):
             try:
-                resolve_tool(tool)
-            except OSError:
+                binary = resolve_tool(tool)
+                result = run_text_process(
+                    [binary, "-version"],
+                    timeout=10,
+                    not_found_message=f"'{tool}' could not be executed.",
+                    timeout_message=f"'{tool} -version' timed out.",
+                )
+                if result.returncode != 0:
+                    detail = (result.stderr or result.stdout or "").strip()
+                    raise OSError(detail or f"exit code {result.returncode}")
+            except (OSError, RuntimeError) as exc:
                 raise OSError(
                     f"'{tool}' not found. Please install FFmpeg:\n"
                     f"  https://ffmpeg.org/download.html\n"
                     f"  Windows: winget install ffmpeg\n"
                     f"  macOS:   brew install ffmpeg\n"
-                    f"  Linux:   sudo apt install ffmpeg"
-                )
+                    f"  Linux:   sudo apt install ffmpeg\n"
+                    f"Details: {exc}"
+                ) from exc
 
     # ── Ses Bilgisi Okuma ────────────────────────────────────────────────
 
@@ -127,11 +135,18 @@ class FFmpegWrapper:
             path: Ses dosyasının yolu.
 
         Returns:
-            ``AudioInfo`` nesnesi.  FFprobe başarısız olursa varsayılan değerler
-            döndürülür ve uyarı bilgisi ``warnings`` listesine eklenir.
+            Güvenilir ``AudioInfo`` nesnesi.
+
+        Raises:
+            AudioProbeError: FFprobe başarısızsa veya gerekli alanlar eksikse.
         """
+        try:
+            ffprobe = resolve_tool("ffprobe")
+        except OSError as exc:
+            raise AudioProbeError(f"FFprobe is unavailable: {exc}") from exc
+
         cmd = [
-            resolve_tool("ffprobe"),
+            ffprobe,
             "-v", "error",
             "-select_streams", "a:0",
             "-show_entries",
@@ -140,18 +155,25 @@ class FFmpegWrapper:
             path,
         ]
 
-        result = self._run_command(cmd, timeout=self._config.ffprobe_timeout_sec)
+        try:
+            result = self._run_command(cmd, timeout=self._config.ffprobe_timeout_sec)
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            raise AudioProbeError(
+                f"FFprobe could not read audio metadata for '{path}': {exc}"
+            ) from exc
 
         if result.returncode != 0:
-            warnings.warn(
-                f"FFprobe could not read audio info, using defaults "
-                f"(32-bit, stereo, 48 kHz): {path}",
-                RuntimeWarning,
-                stacklevel=2,
+            detail = (result.stderr or "").strip()[-600:] or "no diagnostic output"
+            raise AudioProbeError(
+                f"FFprobe could not read audio metadata for '{path}': {detail}"
             )
-            return AudioInfo.default()
 
         info = self._parse_ffprobe_output(result.stdout)
+        if not info.get("channels") or not info.get("sample_rate"):
+            raise AudioProbeError(
+                f"FFprobe returned incomplete audio metadata for '{path}'. "
+                "The file may not contain a readable audio stream."
+            )
 
         channels = self._safe_int(info.get("channels"), default=2, minimum=1)
         sample_rate = self._safe_int(info.get("sample_rate"), default=48000, minimum=8000)
@@ -488,8 +510,8 @@ class FFmpegWrapper:
             src_orig: Kaynak (referans) ses dosyası yolu.
             sync_orig: Senkronize edilecek ses dosyası yolu.
             delay_ms: Hesaplanan gecikme (ms).
-                Pozitif → sync ses erkende, kaynak geciktirilir.
-                Negatif → sync ses geçte, sync geciktirilir.
+                Pozitif → sync ses erkende, sync ses geciktirilir.
+                Negatif → sync ses geçte, sync sesin başı kırpılır.
             audio_info: Senkronize edilecek sesin bilgileri.
             output_sr: Çıktı örnekleme oranı kararı.
             out_path: Çıktı dosyası yolu.
@@ -639,44 +661,24 @@ class FFmpegWrapper:
         self, src: str, sync: str, delay_ms: float, abs_ms: float,
         channels: int, pcm_codec: str, output_sr: OutputSampleRate, out_path: str,
     ) -> tuple[list[str], str]:
-        """atempo modu — yalnızca sync (hedef) ses çıktıya yazılır.
+        """Geriye uyumlu atempo modu — kesin sabit ofset uygular.
 
-        Küçük gecikmelerde (<50 ms) ``atempo`` filtresi ile ince ayar,
-        büyük gecikmelerde ``adelay``/``atrim`` ile zaman düzeltmesi yapar.
-        src (referans) ses çıktıya dahil edilmez.
+        Sabit bir ofseti ilk saniyelere tempo değişikliği olarak yaymak yerine
+        her iki yönde de ``adelay``/``atrim`` kullanır. ``src`` (referans) ses
+        yalnızca analiz içindir ve çıktıya dahil edilmez.
         """
         delay_sec = abs_ms / 1000.0
         delay_str = "|".join([f"{abs_ms:.3f}"] * channels)
 
-        # Küçük gecikmelerde ilk bölüm üzerinde atempo ile ince ayar (50 ms eşiği)
-        use_atempo_fine = abs_ms < 50.0 and abs_ms > 0.1
-        atempo_value: float = 1.0
         mode_detail = "copy"
 
-        if abs_ms < 1.0:
-            # İhmal edilebilir gecikme — sync'i olduğu gibi kopyala
+        if abs_ms <= 0.01:
             flt = "[0:a]acopy[out]"
             mode_detail = "copy"
-        elif use_atempo_fine:
-            # Küçük gecikme: ilk 10 saniyede tempo ince ayarı ile farkı absorbe et
-            window_sec = 10.0
-            target_window = window_sec + delay_sec if delay_ms >= 0 else window_sec - delay_sec
-            atempo_value = window_sec / target_window
-            atempo_value = max(0.5, min(2.0, atempo_value))
-            flt = (
-                f"[0:a]asplit=2[head_src][tail_src];"
-                f"[head_src]atrim=end={window_sec:.6f},asetpts=PTS-STARTPTS,"
-                f"atempo={atempo_value:.10f}[head];"
-                f"[tail_src]atrim=start={window_sec:.6f},asetpts=PTS-STARTPTS[tail];"
-                f"[head][tail]concat=n=2:v=0:a=1[out]"
-            )
-            mode_detail = f"first-{window_sec:.1f}s atempo={atempo_value:.6f}"
         elif delay_ms >= 0:
-            # Sync ses erkende → başına gecikme ekle
             flt = f"[0:a]adelay={delay_str}:all=1[out]"
             mode_detail = f"adelay={abs_ms:.3f}ms"
         else:
-            # Sync ses geçte → başından kırp
             flt = f"[0:a]atrim=start={delay_sec:.6f},asetpts=PTS-STARTPTS[out]"
             mode_detail = f"atrim={delay_sec:.3f}s"
 
@@ -1079,15 +1081,15 @@ class FFmpegWrapper:
                     text=True,
                     timeout=timeout,
                 )
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as exc:
                 raise RuntimeError(
                     f"'{cmd[0]}' command did not complete within {timeout} seconds. "
                     f"The file may be corrupted or inaccessible."
-                )
-            except FileNotFoundError:
+                ) from exc
+            except FileNotFoundError as exc:
                 raise OSError(
                     f"'{cmd[0]}' not found. Make sure FFmpeg is in your PATH."
-                )
+                ) from exc
 
         return self._run_text_command(cmd, timeout=timeout, cancel_event=cancel_event)
 

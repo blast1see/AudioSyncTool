@@ -1,53 +1,63 @@
 """Main application window — UI coordination only.
 
-Business logic resides in ``core.analyzer`` and ``core.ffmpeg_wrapper``,
-utility functions in ``utils``.
+Business logic resides in ``core.pipeline``, ``core.analyzer``, and
+``core.ffmpeg_wrapper``; utility functions live in ``utils``.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
-import shutil
 import tempfile as _tempfile_mod
 import threading
 import time
 import tkinter as tk
-from pathlib import Path
+from dataclasses import dataclass
 from tkinter import filedialog, messagebox
 from typing import TYPE_CHECKING, Callable
 
 from audio_sync.config import (
-    THEME, FONTS, SYNC_CONFIG, SyncConfig, SyncMode,
-    DeewFormat, DeewDownmix, DeewDRC,
-    DEEW_COMMON_BITRATES, DEEW_DEFAULT_BITRATES,
-    get_deew_bitrate_key,
-    FpsConversion,
-    FFMPEG_AC3_BITRATES, FFMPEG_EAC3_BITRATES,
-    FFMPEG_AC3_DEFAULT_BITRATE, FFMPEG_EAC3_DEFAULT_BITRATE,
-    CONTAINER_EXTENSIONS,
     CODEC_EXTENSION_MAP,
-    EncodingPipeline,
-    FFmpegOutputFormat,
-    QaacMode,
-    QaacConfig,
-    ToolPaths,
-    save_tool_paths,
+    CONTAINER_EXTENSIONS,
+    DEEW_COMMON_BITRATES,
+    DEEW_DEFAULT_BITRATES,
+    FFMPEG_AC3_BITRATES,
+    FFMPEG_AC3_DEFAULT_BITRATE,
+    FFMPEG_EAC3_BITRATES,
+    FFMPEG_EAC3_DEFAULT_BITRATE,
+    FONTS,
+    SYNC_CONFIG,
+    THEME,
     TOOL_PATHS,
+    DeewConfig,
+    DeewDownmix,
+    DeewDRC,
+    DeewFormat,
+    EncodingPipeline,
+    FFmpegEncodeConfig,
+    FFmpegOutputFormat,
+    FpsConversion,
+    QaacConfig,
+    QaacMode,
+    SyncConfig,
+    SyncMode,
+    ToolPaths,
+    get_deew_bitrate_key,
     resolve_tool,
+    save_tool_paths,
 )
-from audio_sync.core.deew_encoder import encode_wav_with_deew, get_deew_runtime_status, resolve_deew_backend
+from audio_sync.core.deew_encoder import get_deew_runtime_status, resolve_deew_backend
 from audio_sync.core.encoder import QaacEncoder
 from audio_sync.core.ffmpeg_wrapper import FFmpegWrapper
 from audio_sync.core.models import (
     AnalysisResult,
     AudioInfo,
+    EncodingError,
     OperationCancelledError,
     OutputSampleRate,
-    ProgressCallback,
 )
-from audio_sync.i18n import Language, I18n, get_i18n, t
-from audio_sync.ui.drop_zone import DropZone, is_dnd_available
+from audio_sync.core.pipeline import EncodingRequest, SyncPipeline, SyncRequest
+from audio_sync.i18n import Language, get_i18n, t
+from audio_sync.ui.drop_zone import DropZone
 from audio_sync.ui.stream_dialog import ask_stream_selection
 from audio_sync.utils import parse_float, parse_int, validate_file
 
@@ -107,6 +117,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._config = config
         self._ffmpeg = ffmpeg or FFmpegWrapper(config=config)
         self._analyzer = analyzer
+        self._pipeline = SyncPipeline(config=config, ffmpeg=self._ffmpeg, analyzer=analyzer)
 
         # Durum
         self._src_path: str = ""
@@ -1699,7 +1710,6 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         setattr(self, f"_extracting_{role}", True)
 
         self._log(t("log_mkv_detected"))
-        log_key = "log_source" if role == "src" else "log_sync_file"
         zone = self.zone_src if role == "src" else self.zone_sync
 
         # Show loading state
@@ -1775,9 +1785,10 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                 self.after(0, lambda: self._container_on_extracted(
                     tmp_path, role,
                 ))
-            except Exception as e:
+            except Exception as exc:
+                error_text = str(exc)
                 self.after(0, lambda: self._container_on_extract_error(
-                    str(e), tmp_path, role,
+                    error_text, tmp_path, role,
                 ))
 
         threading.Thread(target=_extract_thread, daemon=True).start()
@@ -2358,246 +2369,153 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         sync_mode: SyncMode = SyncMode.ADELAY_AMIX,
         encoding_params: dict | None = None,
     ) -> None:
-        """Arka plan thread'inde senkronizasyon işlemini yürütür."""
-        fps_tmp_path: str | None = None
-        src_pcm_path: str | None = None
-        sync_pcm_path: str | None = None
-        wav_out_path: str | None = None  # Deew encoding ara WAV dosyası
-        needs_encoding: bool = False
-        out_path_preexisting = os.path.exists(out_path)
-
+        """Run the typed, atomic synchronization pipeline on a worker thread."""
+        enc = encoding_params or {}
         try:
-            prepared = self._prepare_analysis(
-                src_path,
-                sync_path,
+            pipeline = EncodingPipeline(
+                enc.get("pipeline", EncodingPipeline.NONE.value)
+            )
+            ffmpeg_format_value = enc.get(
+                "ffmpeg_format",
+                FFmpegOutputFormat.AAC.codec,
+            )
+            ffmpeg_format = next(
+                (
+                    candidate
+                    for candidate in FFmpegOutputFormat
+                    if candidate.codec == ffmpeg_format_value
+                ),
+                FFmpegOutputFormat.AAC,
+            )
+            encoding = EncodingRequest(
+                pipeline=pipeline,
+                ffmpeg=FFmpegEncodeConfig(
+                    format=ffmpeg_format,
+                    aac_bitrate=enc.get("ffmpeg_aac_bitrate", 256),
+                    flac_compression=enc.get("ffmpeg_flac_compression", 5),
+                    flac_bit_depth=enc.get("ffmpeg_flac_bit_depth", 24),
+                    opus_bitrate=enc.get("ffmpeg_opus_bitrate", 128),
+                    ac3_bitrate=enc.get(
+                        "ffmpeg_ac3eac3_bitrate",
+                        FFMPEG_AC3_DEFAULT_BITRATE,
+                    ),
+                    eac3_bitrate=enc.get(
+                        "ffmpeg_ac3eac3_bitrate",
+                        FFMPEG_EAC3_DEFAULT_BITRATE,
+                    ),
+                ),
+                qaac=QaacConfig(
+                    mode=next(
+                        (
+                            candidate
+                            for candidate in QaacMode
+                            if candidate.flag == enc.get("qaac_mode")
+                        ),
+                        QaacMode.TVBR,
+                    ),
+                    tvbr_quality=enc.get("qaac_tvbr_quality", 91),
+                    cvbr_bitrate=enc.get("qaac_cvbr_bitrate", 256),
+                    abr_bitrate=enc.get("qaac_abr_bitrate", 256),
+                    cbr_bitrate=enc.get("qaac_cbr_bitrate", 256),
+                    he_aac=enc.get("qaac_he_aac", False),
+                    no_delay=enc.get("qaac_no_delay", True),
+                ),
+                deew=DeewConfig(
+                    enabled=deew_params is not None,
+                    format=(
+                        deew_params["format"]
+                        if deew_params is not None
+                        else DeewFormat.DDP
+                    ),
+                    bitrate=(
+                        deew_params["bitrate"]
+                        if deew_params is not None
+                        else None
+                    ),
+                    downmix=(
+                        deew_params["downmix"]
+                        if deew_params is not None
+                        else None
+                    ),
+                    drc=(
+                        deew_params["drc"]
+                        if deew_params is not None
+                        else DeewDRC.MUSIC_LIGHT
+                    ),
+                    dialnorm=(
+                        deew_params["dialnorm"]
+                        if deew_params is not None
+                        else 0
+                    ),
+                    delete_intermediate_wav=(
+                        deew_params["delete_wav"]
+                        if deew_params is not None
+                        else True
+                    ),
+                ),
+                ffmpeg_channels=enc.get("ffmpeg_downmix_channels"),
+            )
+            request = SyncRequest(
+                source_path=src_path,
+                sync_path=sync_path,
+                output_path=out_path,
+                skip_intro_sec=skip_sec,
+                total_segments=segment_count,
                 force_48k=force_48k,
                 fps_conversion=fps_conversion,
-                probe_message=t("log_reading_info"),
-                decode_message=t("log_preparing_mono"),
-                probe_progress=5,
-                post_probe_progress=12,
-                fps_progress=16,
-                decode_start_progress=22,
-                src_decoded_progress=30,
-                sync_decoded_progress=40,
-                fps_tmp_prefix="audiosync_fps_",
-                detail_logger=lambda src_info, sync_info, output_sr: self._log_audio_info(
-                    src_info,
-                    sync_info,
-                    output_sr,
-                    skip_sec,
-                    segment_count,
+                sync_mode=sync_mode,
+                encoding=encoding,
+            )
+            outcome = self._pipeline.run(
+                request,
+                cancel_event=self._cancel_event,
+                on_log=self._log,
+                on_progress=self._set_progress,
+            )
+
+            self._delay_ms = outcome.analysis.delay_ms
+            self._update_info_panel(
+                outcome.sync_info,
+                outcome.output_sample_rate,
+            )
+            self._display_analysis_result(outcome.analysis)
+            self._log(t("log_command", cmd=outcome.sync_summary))
+            if outcome.encoding_summary:
+                self._log(
+                    t(
+                        "encoding_complete",
+                        summary=outcome.encoding_summary,
+                    )
+                )
+            self.after(
+                0,
+                lambda: messagebox.showinfo(
+                    t("success_title"),
+                    t("file_saved_msg", path=outcome.output_path),
                 ),
             )
-            fps_tmp_path = prepared.fps_tmp_path
-            src_pcm_path = prepared.src_pcm_path
-            sync_pcm_path = prepared.sync_pcm_path
-            self._log(t("log_sync_mode", mode=sync_mode.display_name))
-
-            result = self._calculate_delay_result(
-                prepared,
-                skip_sec=skip_sec,
-                segment_count=segment_count,
-                analyze_message=t("log_analyzing"),
-                progress=48,
-            )
-
-            self._delay_ms = result.delay_ms
-            self._display_analysis_result(result)
-
-            enc = encoding_params or {}
-            pipeline = enc.get("pipeline", EncodingPipeline.NONE.value)
-            needs_encoding = (
-                deew_params is not None
-                or pipeline in (
-                    EncodingPipeline.FFMPEG.value,
-                    EncodingPipeline.QAAC.value,
-                )
-            )
-
-            if needs_encoding:
-                _fd, wav_out_path = _tempfile_mod.mkstemp(
-                    suffix=".wav", prefix="audiosync_",
-                    dir=os.path.dirname(out_path) or ".",
-                )
-                os.close(_fd)
-            else:
-                wav_out_path = out_path
-
-            self._log(t("log_applying_sync"))
-            self._set_progress(60)
-            sync_started = time.perf_counter()
-            self._check_cancelled()
-            cmd_summary = self._ffmpeg.apply_sync(
-                src_path,
-                prepared.effective_sync_path,
-                result.delay_ms,
-                prepared.sync_info,
-                prepared.output_sr,
-                wav_out_path,
-                sync_mode=sync_mode,
-                cancel_event=self._cancel_event,
-            )
-            self._log_timing(t("log_applying_sync"), sync_started)
-            self._log(t("log_command", cmd=cmd_summary))
-
-            if deew_params is not None:
-                self._set_progress(78)
-                fmt: DeewFormat = deew_params["format"]
-                self._log(t("log_deew_start"))
-                self._log(t("log_deew_info",
-                    fmt=fmt.display_name,
-                    br=deew_params['bitrate'] or t("default_bitrate"),
-                    ch=deew_params['downmix'].display_name if deew_params['downmix'] else t("source_keep"),
-                    enc="Deew",
-                ))
-                self._check_cancelled()
-                encode_started = time.perf_counter()
-
-                try:
-                    final_path = encode_wav_with_deew(
-                        input_wav=wav_out_path,
-                        final_output_path=out_path,
-                        fmt=fmt,
-                        bitrate=deew_params["bitrate"],
-                        downmix=deew_params["downmix"],
-                        drc=deew_params["drc"],
-                        dialnorm=deew_params["dialnorm"],
-                        delete_wav=deew_params["delete_wav"],
-                        progress_callback=self._log,
-                        cancel_event=self._cancel_event,
-                    )
-                    self._log_timing(t("log_deew_start"), encode_started)
-                    self._set_progress(95)
-                    self._log(t("log_deew_done", name=os.path.basename(final_path)))
-                except Exception as deew_err:
-                    self._log(t("log_deew_error", err=deew_err))
-                    wav_fallback = str(Path(out_path).with_suffix(".wav"))
-                    if os.path.isfile(wav_out_path):
-                        shutil.move(wav_out_path, wav_fallback)
-                        self._log(t("log_wav_preserved", name=os.path.basename(wav_fallback)))
-                        out_path = wav_fallback
-                    else:
-                        raise RuntimeError(
-                            f"Deew encoding failed and WAV file not found: {deew_err}"
-                        ) from deew_err
-
-            if deew_params is None:
-                if pipeline == EncodingPipeline.FFMPEG.value:
-                    self._log(t("encoding_started"))
-                    fmt_codec = enc.get("ffmpeg_format", FFmpegOutputFormat.AAC.codec)
-                    ffmpeg_channels = enc.get("ffmpeg_downmix_channels")
-                    self._check_cancelled()
-                    encode_started = time.perf_counter()
-
-                    if fmt_codec == FFmpegOutputFormat.AAC.codec:
-                        bitrate = enc.get("ffmpeg_aac_bitrate", 256)
-                        summary = self._ffmpeg.encode_to_aac(
-                            wav_out_path,
-                            out_path,
-                            bitrate=bitrate,
-                            cancel_event=self._cancel_event,
-                        )
-                    elif fmt_codec == FFmpegOutputFormat.FLAC.codec:
-                        compression = enc.get("ffmpeg_flac_compression", 5)
-                        bit_depth = enc.get("ffmpeg_flac_bit_depth", 24)
-                        summary = self._ffmpeg.encode_to_flac(
-                            wav_out_path,
-                            out_path,
-                            compression=compression,
-                            bit_depth=bit_depth,
-                            cancel_event=self._cancel_event,
-                        )
-                    elif fmt_codec == FFmpegOutputFormat.OPUS.codec:
-                        bitrate = enc.get("ffmpeg_opus_bitrate", 128)
-                        summary = self._ffmpeg.encode_to_opus(
-                            wav_out_path,
-                            out_path,
-                            bitrate=bitrate,
-                            cancel_event=self._cancel_event,
-                        )
-                    elif fmt_codec == FFmpegOutputFormat.AC3.codec:
-                        bitrate = enc.get("ffmpeg_ac3eac3_bitrate", FFMPEG_AC3_DEFAULT_BITRATE)
-                        summary = self._ffmpeg.encode_to_ac3_eac3(
-                            wav_out_path,
-                            out_path,
-                            fmt=DeewFormat.DD,
-                            bitrate=bitrate,
-                            channels=ffmpeg_channels,
-                            cancel_event=self._cancel_event,
-                        )
-                    elif fmt_codec == FFmpegOutputFormat.EAC3.codec:
-                        bitrate = enc.get("ffmpeg_ac3eac3_bitrate", FFMPEG_EAC3_DEFAULT_BITRATE)
-                        summary = self._ffmpeg.encode_to_ac3_eac3(
-                            wav_out_path,
-                            out_path,
-                            fmt=DeewFormat.DDP,
-                            bitrate=bitrate,
-                            channels=ffmpeg_channels,
-                            cancel_event=self._cancel_event,
-                        )
-                    else:
-                        summary = ""
-
-                    self._log_timing(t("encoding_started"), encode_started)
-                    self._log(t("encoding_complete", summary=summary))
-                    self._set_progress(95)
-
-                elif pipeline == EncodingPipeline.QAAC.value:
-                    self._log(t("encoding_started"))
-                    self._check_cancelled()
-                    encode_started = time.perf_counter()
-                    mode_flag = enc.get("qaac_mode", QaacMode.TVBR.flag)
-                    mode = next((m for m in QaacMode if m.flag == mode_flag), QaacMode.TVBR)
-
-                    config = QaacConfig(
-                        mode=mode,
-                        tvbr_quality=enc.get("qaac_tvbr_quality", 91),
-                        cvbr_bitrate=enc.get("qaac_cvbr_bitrate", 256),
-                        abr_bitrate=enc.get("qaac_abr_bitrate", 256),
-                        cbr_bitrate=enc.get("qaac_cbr_bitrate", 256),
-                        he_aac=enc.get("qaac_he_aac", False),
-                        no_delay=enc.get("qaac_no_delay", True),
-                    )
-
-                    summary = QaacEncoder.encode(
-                        wav_out_path,
-                        out_path,
-                        config,
-                        cancel_event=self._cancel_event,
-                    )
-                    self._log_timing(t("encoding_started"), encode_started)
-                    self._log(t("encoding_complete", summary=summary))
-                    self._set_progress(95)
-
-            self._set_progress(100)
-            self._log(t("log_completed", name=os.path.basename(out_path)))
-            self.after(0, lambda: messagebox.showinfo(
-                t("success_title"), t("file_saved_msg", path=out_path),
-            ))
-
         except OperationCancelledError:
             self._log(t("log_cancelled"))
-            if not out_path_preexisting and os.path.isfile(out_path):
-                try:
-                    os.remove(out_path)
-                except OSError:
-                    pass
-        except Exception as e:
-            self._log(t("log_error", err=e))
-            self.after(0, lambda err=str(e): messagebox.showerror(t("error_title"), err))
-            if not out_path_preexisting and os.path.isfile(out_path):
-                try:
-                    os.remove(out_path)
-                except OSError:
-                    pass
+        except EncodingError as exc:
+            self._log(t("log_error", err=exc))
+            if exc.fallback_path:
+                self._log(
+                    t(
+                        "log_wav_preserved",
+                        name=os.path.basename(exc.fallback_path),
+                    )
+                )
+            self.after(
+                0,
+                lambda err=str(exc): messagebox.showerror(t("error_title"), err),
+            )
+        except Exception as exc:
+            self._log(t("log_error", err=exc))
+            self.after(
+                0,
+                lambda err=str(exc): messagebox.showerror(t("error_title"), err),
+            )
         finally:
-            for tmp_path in (fps_tmp_path, src_pcm_path, sync_pcm_path, wav_out_path):
-                if tmp_path is not None and tmp_path != out_path and os.path.isfile(tmp_path):
-                    try:
-                        os.remove(tmp_path)
-                    except OSError:
-                        pass
             with self._processing_lock:
                 self._processing = False
 

@@ -7,10 +7,10 @@ import enum
 import json
 import os
 import shutil
+import tempfile
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-
 
 # ── Tool Path Resolution ─────────────────────────────────────────────
 _TOOL_PATHS_DIR = Path.home() / ".audio_sync_tool"
@@ -58,17 +58,34 @@ def save_tool_paths(paths: ToolPaths) -> bool:
     Returns:
         True if saved successfully, False on I/O error.
     """
-    global TOOL_PATHS
-    TOOL_PATHS = paths
+    temp_path: Path | None = None
     try:
         _TOOL_PATHS_DIR.mkdir(parents=True, exist_ok=True)
         data = {"version": 1, "tool_paths": paths.to_dict()}
-        _TOOL_PATHS_FILE.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False),
+        with tempfile.NamedTemporaryFile(
+            mode="w",
             encoding="utf-8",
-        )
+            dir=_TOOL_PATHS_DIR,
+            prefix=f".{_TOOL_PATHS_FILE.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_path = Path(handle.name)
+            json.dump(data, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+
+        os.replace(temp_path, _TOOL_PATHS_FILE)
+        global TOOL_PATHS
+        TOOL_PATHS = paths
         return True
     except Exception:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         return False
 
 
@@ -101,8 +118,8 @@ def resolve_tool(name: str) -> str:
             if found:
                 return found
         raise OSError(
-            f"qaac not found. Please install qaac and add it to PATH "
-            f"(expected at C:\\qaac). The binary may be named qaac64.exe."
+            "qaac not found. Please install qaac and add it to PATH "
+            "(expected at C:\\qaac). The binary may be named qaac64.exe."
         )
     
     # Standard PATH lookup
@@ -122,7 +139,7 @@ class SyncMode(Enum):
     Her mod farklı bir FFmpeg filtre stratejisi kullanır:
         - ADELAY_AMIX: Varsayılan — adelay / atrim ile gecikme uygulama.
         - ARESAMPLE: aresample filtresi ile örnekleme oranı tabanlı senkronizasyon.
-        - ATEMPO: küçük farklarda tempo tabanlı ince ayar, büyük farklarda trim/delay.
+        - ATEMPO: geriye uyumlu ad; kesin adelay / atrim ofset düzeltmesi.
         - RUBBERBAND: librubberband tabanlı yüksek kaliteli zaman uzatma/sıkıştırma.
         - APAD: basit geciktirme/kırpma tabanlı senkronizasyon.
         - ASYNCTS: agresif async resample tabanlı senkronizasyon.
@@ -140,9 +157,9 @@ class SyncMode(Enum):
     ARESAMPLE = ("aresample", "aresample",
                  "Örnekleme oranı tabanlı senkronizasyon",
                  "Sample rate based synchronization")
-    ATEMPO = ("atempo", "atempo (trim + fine-tune)",
-              "Küçük farklarda tempo ince ayarı, büyük farklarda kırpma/geciktirme",
-              "Tempo fine-tuning for tiny offsets, trim/delay for larger ones")
+    ATEMPO = ("atempo", "atempo (exact offset)",
+              "Geriye uyumlu mod: sabit ofseti kesin kırpma/geciktirme ile uygular",
+              "Compatibility mode: applies exact trim/delay for constant offsets")
     RUBBERBAND = ("rubberband", "rubberband (high quality)",
                   "Kırpma + rubberband kalite iyileştirme (librubberband gerektirir)",
                   "Trim + rubberband quality enhancement (requires librubberband)")
