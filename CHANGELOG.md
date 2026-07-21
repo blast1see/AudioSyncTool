@@ -6,6 +6,22 @@
 
 ## English
 
+### Unreleased
+
+#### Added
+- Testable `SyncPipeline` orchestration with atomic output commits and synchronized WAV recovery on encoding failure
+- Automated unit, integration, GUI smoke, lint, coverage, dependency, and Windows build checks
+
+#### Changed
+- FFmpeg and FFprobe paths are now validated by actually starting each tool
+- Synchronized audio keeps its own sample rate unless 48 kHz conversion is explicitly requested
+- Fixed offsets use exact delay/trim behavior in every direction; the compatibility `atempo` mode no longer distorts the first ten seconds
+
+#### Fixed
+- Existing outputs and input files are protected from failed, cancelled, or unsafe writes
+- FFprobe, qaac, Deew, and final encoding failures can no longer be reported as successful
+- Tool-path settings are committed atomically and remain unchanged in memory after a disk-write failure
+
 ### [2.2.5] - 2026-04-13
 
 #### Changed
@@ -143,6 +159,22 @@
 ---
 
 ## Turkce
+
+### Unreleased
+
+#### Eklenenler
+- Atomik cikti tamamlama ve kodlama hatasinda senkron WAV kurtarma destekli, test edilebilir `SyncPipeline` is akisi
+- Otomatik birim, entegrasyon, GUI smoke, lint, coverage, bagimlilik ve Windows build kontrolleri
+
+#### Degisenler
+- FFmpeg ve FFprobe yollari artik her araci gercekten baslatarak dogrulaniyor
+- Senkronize edilen ses, 48 kHz donusumu acikca istenmedikce kendi ornekleme oranini koruyor
+- Sabit ofsetler iki yonde de kesin gecikme/kirpma ile uygulaniyor; geriye uyumlu `atempo` modu ilk on saniyeyi artik bozmuyor
+
+#### Duzeltilenler
+- Mevcut ciktilar ve girdi dosyalari basarisiz, iptal edilen veya guvensiz yazma islemlerinden korunuyor
+- FFprobe, qaac, Deew ve son kodlama hatalari artik basarili olarak gosterilemiyor
+- Arac yolu ayarlari atomik kaydediliyor; disk yazma hatasinda bellekteki ayarlar degismiyor
 
 ### [2.2.5] - 2026-04-13
 

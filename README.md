@@ -78,6 +78,19 @@ pip install tkinterdnd2
 
 > **Note:** `tkinterdnd2` enables drag & drop functionality in the GUI. The application works without it, but file selection will be limited to the file browser dialog.
 
+#### Development and tests
+
+```bash
+python -m pip install -e ".[dev]"
+python -m ruff check .
+python -m compileall -q audio_sync tests
+python -m pytest -m "not integration and not gui"
+python -m pytest -m integration   # requires FFmpeg and FFprobe
+```
+
+Linux GUI smoke tests use `xvfb-run -a python -m pytest -m gui`. The CI matrix also
+checks Python 3.10, 3.12, and 3.14 and builds the Windows executable with PyInstaller.
+
 ### Usage Guide
 
 1. **Select Source Audio** — Click "Browse" or drag & drop the audio file that needs to be synchronized (the one with the delay).
@@ -126,7 +139,7 @@ pip install tkinterdnd2
 |---|---|
 | **adelay / atrim** | Applies delay or trim to the target audio only. Best general-purpose mode. |
 | **aresample** | Resamples audio to adjust timing. Good for minor drift corrections. |
-| **atempo** | Changes audio tempo without altering pitch. Useful for speed-based sync. |
+| **atempo (exact offset)** | Compatibility mode that applies an exact delay or trim; it does not spread a fixed offset into a tempo change. |
 | **rubberband** | High-quality time-stretching using the Rubber Band library. Best for quality-sensitive work. |
 | **delay / trim (simple)** | Applies straightforward delay or trim to the target audio. Simple and effective. |
 | **async resample (1000)** | Uses aggressive async resampling for difficult timing mismatches. |
@@ -301,6 +314,19 @@ pip install tkinterdnd2
 
 > **Not:** `tkinterdnd2`, arayüzde sürükle & bırak işlevselliğini etkinleştirir. Uygulama bu paket olmadan da çalışır, ancak dosya seçimi yalnızca dosya tarayıcı diyalogu ile sınırlı kalır.
 
+#### Geliştirme ve testler
+
+```bash
+python -m pip install -e ".[dev]"
+python -m ruff check .
+python -m compileall -q audio_sync tests
+python -m pytest -m "not integration and not gui"
+python -m pytest -m integration   # FFmpeg ve FFprobe gerektirir
+```
+
+Linux GUI smoke testleri `xvfb-run -a python -m pytest -m gui` ile çalışır. CI matrisi
+ayrıca Python 3.10, 3.12 ve 3.14'ü kontrol eder ve PyInstaller ile Windows EXE'sini üretir.
+
 ### Kullanım Kılavuzu
 
 1. **Kaynak Sesi Seçin** — "Gözat" düğmesine tıklayın veya senkronize edilmesi gereken ses dosyasını (gecikmeli olan) sürükleyip bırakın.
@@ -349,7 +375,7 @@ pip install tkinterdnd2
 |---|---|
 | **adelay / atrim** | Yalnızca hedef sese gecikme veya kırpma uygular. En iyi genel amaçlı mod. |
 | **aresample** | Zamanlamayı ayarlamak için sesi yeniden örnekler. Küçük kayma düzeltmeleri için uygundur. |
-| **atempo** | Perde değiştirmeden ses temposunu değiştirir. Hız tabanlı senkronizasyon için kullanışlıdır. |
+| **atempo (exact offset)** | Geriye uyumlu mod; sabit ofseti tempo değişikliğine yaymadan kesin gecikme veya kırpma uygular. |
 | **rubberband** | Rubber Band kütüphanesi ile yüksek kaliteli zaman uzatma. Kalite hassasiyeti gerektiren işler için en iyisi. |
 | **delay / trim (simple)** | Hedef sese doğrudan gecikme veya kırpma uygular. Basit ve etkilidir. |
 | **async resample (1000)** | Zor zamanlama uyuşmazlıkları için agresif async resample kullanır. |

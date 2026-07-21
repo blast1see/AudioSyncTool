@@ -8,8 +8,6 @@ Deew hakkında: https://github.com/pcroland/deew
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from functools import lru_cache
 import importlib.util
 import os
 import shlex
@@ -17,19 +15,19 @@ import shutil
 import subprocess
 import sys
 import threading
-import time
-import warnings
+from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
 from audio_sync.config import (
-    DeewConfig,
-    DeewDRC,
-    DeewDownmix,
-    DeewFormat,
     DEEW_CONFIG,
-    get_deew_bitrate_key,
     DEEW_DEFAULT_BITRATES,
+    DeewConfig,
+    DeewDownmix,
+    DeewDRC,
+    DeewFormat,
+    get_deew_bitrate_key,
     resolve_tool,
 )
 from audio_sync.core.process_runner import run_text_process
@@ -338,6 +336,12 @@ class DeewEncoder:
         if output_dir is None:
             output_dir = os.path.dirname(input_wav) or "."
 
+        output_snapshot = self._snapshot_output_files(
+            input_wav,
+            output_dir,
+            effective_fmt,
+        )
+
         # Komutu oluştur
         cmd = self._build_command(
             command_prefix=backend.command_prefix,
@@ -379,7 +383,12 @@ class DeewEncoder:
             )
 
         # Çıktı dosyasını bul
-        output_path = self._find_output_file(input_wav, output_dir, effective_fmt)
+        output_path = self._find_output_file(
+            input_wav,
+            output_dir,
+            effective_fmt,
+            previous=output_snapshot,
+        )
 
         if progress_callback:
             progress_callback(f"Deew encoding completed: {os.path.basename(output_path)}")
@@ -466,14 +475,15 @@ class DeewEncoder:
         input_wav: str,
         output_dir: str,
         fmt: DeewFormat,
+        *,
+        previous: dict[str, tuple[int, int]] | None = None,
     ) -> str:
         """Deew'in oluşturduğu çıktı dosyasını bulur.
 
-        Deew, giriş dosyasının adını koruyarak uzantıyı değiştirir.
-        Deew bazen çıktıyı alt dizine, giriş dosyasının dizinine veya
-        farklı bir konuma yazabilir; ayrıca uzantı birincil (``.eac3``)
-        yerine alternatif (``.ec3``) olabilir.  Bu yüzden birden fazla
-        konum ve uzantı taranır.
+        Yalnızca beklenen giriş kökü ve geçerli uzantıyla eşleşen, Deew
+        çalıştırıldıktan sonra yeni oluşmuş veya değişmiş dosyalar kabul edilir.
+        Böylece aynı klasördeki ilgisiz ve yakın zamanda oluşturulmuş bir ses
+        dosyası yanlışlıkla sonuç olarak seçilemez.
 
         Args:
             input_wav: Giriş WAV dosyasının yolu.
@@ -491,88 +501,35 @@ class DeewEncoder:
                 f"Deew output directory not found: {output_dir}"
             )
 
+        previous = previous or {}
         input_stem = Path(input_wav).stem
         input_dir = str(Path(input_wav).parent)
-        # Deew, .eac3 yerine .ec3 uzantısı kullanabilir — tüm olası uzantıları tara
-        all_exts = fmt.all_extensions  # ör. (".eac3", ".ec3")
+        all_exts = fmt.all_extensions
         expected_output = os.path.join(output_dir, f"{input_stem}{fmt.extension}")
-
-        def _has_valid_ext(filename: str) -> bool:
-            """Dosya adının geçerli uzantılardan birine sahip olup olmadığını kontrol eder."""
-            return any(filename.endswith(ext) for ext in all_exts)
-
-        # 1. Tam eşleşme — beklenen yolda dosya var mı? (tüm uzantılar)
-        for ext in all_exts:
-            candidate = os.path.join(output_dir, f"{input_stem}{ext}")
-            if os.path.isfile(candidate):
-                return candidate
-
-        # 2. Giriş dosyasının dizininde kontrol — deew bazen çıktıyı
-        #    -o parametresini yok sayarak giriş dosyasının yanına yazar
-        if input_dir != output_dir:
-            for ext in all_exts:
-                input_dir_output = os.path.join(input_dir, f"{input_stem}{ext}")
-                if os.path.isfile(input_dir_output):
-                    warnings.warn(
-                        f"Deew output file found in input directory instead of -o directory: "
-                        f"{input_dir_output}",
-                        RuntimeWarning,
-                        stacklevel=2,
-                    )
-                    return input_dir_output
-
-        # Aranacak dizinler: çıktı dizini + giriş dizini (farklıysa)
-        search_dirs = [output_dir]
-        if input_dir != output_dir and os.path.isdir(input_dir):
-            search_dirs.append(input_dir)
-
-        # 3. Düz dizinlerde ada göre arama (prefix + uzantı)
-        for search_dir in search_dirs:
-            try:
-                for f in os.listdir(search_dir):
-                    full = os.path.join(search_dir, f)
-                    if os.path.isfile(full) and f.startswith(input_stem) and _has_valid_ext(f):
-                        return full
-            except OSError:
-                pass
-
-        # 4. Alt dizinlerde rekürsif arama — deew bazen çıktıyı
-        #    alt klasöre (ör. output_dir/subfolder/) yazabilir
-        for search_dir in search_dirs:
-            for root, _dirs, files in os.walk(search_dir):
-                if root == search_dir:
-                    continue  # Düz dizin zaten tarandı (adım 3)
-                for f in files:
-                    if _has_valid_ext(f) and f.startswith(input_stem):
-                        return os.path.join(root, f)
-
-        # 5. Tüm arama dizinlerinde uzantıya göre en yeni dosya (son 120 sn)
-        now = time.time()
-        max_age_sec = 120.0
-        candidates: list[str] = []
-        for search_dir in search_dirs:
-            for root, _dirs, files in os.walk(search_dir):
-                for f in files:
-                    if _has_valid_ext(f):
-                        full = os.path.join(root, f)
-                        try:
-                            if (now - os.path.getmtime(full)) < max_age_sec:
-                                candidates.append(full)
-                        except OSError:
-                            pass
-
-        if candidates:
-            warnings.warn(
-                f"Deew output file not found by name; using most recent file "
-                f"created in the last {max_age_sec:.0f}s as fallback "
-                f"({len(candidates)} candidates).",
-                RuntimeWarning,
-                stacklevel=2,
+        current = DeewEncoder._snapshot_output_files(input_wav, output_dir, fmt)
+        fresh = [
+            path
+            for path, signature in current.items()
+            if previous.get(path) != signature
+        ]
+        if fresh:
+            direct_names = {
+                str((Path(output_dir) / f"{input_stem}{ext}").resolve())
+                for ext in all_exts
+            }
+            fresh.sort(
+                key=lambda path: (
+                    path not in direct_names,
+                    -current[path][0],
+                    path,
+                )
             )
-            return max(candidates, key=os.path.getmtime)
+            return fresh[0]
 
-        # 6. Dizin içeriğini hata mesajına ekle (debug kolaylığı)
         dir_contents: list[str] = []
+        search_dirs = [output_dir]
+        if os.path.normcase(input_dir) != os.path.normcase(output_dir):
+            search_dirs.append(input_dir)
         for search_dir in search_dirs:
             for root, _dirs, files in os.walk(search_dir):
                 for f in files:
@@ -589,6 +546,38 @@ class DeewEncoder:
             f"Input directory: {input_dir}\n"
             f"Directory contents:\n  {contents_str}"
         )
+
+    @staticmethod
+    def _snapshot_output_files(
+        input_wav: str,
+        output_dir: str,
+        fmt: DeewFormat,
+    ) -> dict[str, tuple[int, int]]:
+        """Return signatures for only the output names Deew may legitimately create."""
+        input_path = Path(input_wav)
+        expected_names = {f"{input_path.stem}{ext}" for ext in fmt.all_extensions}
+        candidates: set[Path] = set()
+
+        output_root = Path(output_dir)
+        if output_root.is_dir():
+            for root, _dirs, files in os.walk(output_root):
+                for filename in files:
+                    if filename in expected_names:
+                        candidates.add(Path(root) / filename)
+
+        input_root = input_path.parent
+        if input_root.resolve() != output_root.resolve():
+            for filename in expected_names:
+                candidates.add(input_root / filename)
+
+        snapshot: dict[str, tuple[int, int]] = {}
+        for candidate in candidates:
+            try:
+                stat = candidate.stat()
+            except OSError:
+                continue
+            snapshot[str(candidate.resolve())] = (stat.st_mtime_ns, stat.st_size)
+        return snapshot
 
 
 # ── Yardımcı Fonksiyonlar ───────────────────────────────────────────────────

@@ -7,7 +7,6 @@ from typing import Protocol
 
 from audio_sync.config import PcmCodec
 
-
 # ── Ses Bilgisi ──────────────────────────────────────────────────────────────
 
 
@@ -29,7 +28,7 @@ class AudioInfo:
 
     @classmethod
     def default(cls) -> AudioInfo:
-        """FFprobe başarısız olduğunda kullanılacak varsayılan değerler."""
+        """Return explicit fallback metadata for callers that opt into it."""
         return cls(channels=2, codec=PcmCodec.S32LE, bits=32, sample_rate=48000)
 
 
@@ -65,9 +64,13 @@ class OutputSampleRate:
         Returns:
             Uygun ``OutputSampleRate`` örneği.
         """
-        if force_48k or src_sr != 48000 or sync_sr != 48000:
+        # ``src_sr`` is retained in the public signature for compatibility.
+        # Only the synchronized track is written, so the reference track's
+        # sample rate must not force an unnecessary conversion.
+        _ = src_sr
+        if force_48k:
             return cls(rate=48000, label="48000 Hz")
-        return cls(rate=None, label="keep source (already 48 kHz)")
+        return cls(rate=None, label=f"keep source ({sync_sr} Hz)")
 
 
 # ── Analiz Sonucu ────────────────────────────────────────────────────────────
@@ -98,6 +101,22 @@ class AnalysisResult:
 
 class OperationCancelledError(RuntimeError):
     """Raised when a long-running background operation is cancelled by the user."""
+
+
+class AudioProbeError(RuntimeError):
+    """Raised when FFprobe cannot produce trustworthy audio metadata."""
+
+
+class UnsafeOutputPathError(ValueError):
+    """Raised when an output path would overwrite one of the input files."""
+
+
+class EncodingError(RuntimeError):
+    """Raised when final encoding fails after synchronization completed."""
+
+    def __init__(self, message: str, fallback_path: str | None = None) -> None:
+        super().__init__(message)
+        self.fallback_path = fallback_path
 
 
 # ── İlerleme Callback Protokolü ─────────────────────────────────────────────
