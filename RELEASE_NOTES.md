@@ -1,52 +1,48 @@
-# Audio Sync Tool v2.2.6
+# Audio Sync Tool v2.3.0
 
 ## What's New / Yenilikler
 
-### Reliability and data safety
-- Outputs are now written to a temporary file and committed atomically only after validation
-- Existing outputs and input files remain protected when a job fails or is cancelled
-- Failed final encodes report an error and preserve a collision-free `*.sync-fallback.wav`
-- FFmpeg, FFprobe, qaac, and Deew failures can no longer be reported as successful completion
+### Security
+- **External tools are no longer resolved from the working directory.** On Windows `shutil.which()` searches the current directory before PATH, so launching the app from a folder that contained a planted `ffmpeg.exe` or `ffprobe.exe` executed that binary instead of the installed one. Tool lookup now only accepts absolute PATH entries, and relative PATH entries are skipped too.
+- Deew runtime probes write to a per-user directory instead of the installation tree, which is read-only for system-wide installs and ephemeral inside a PyInstaller bundle.
+- Media paths are made absolute before reaching FFmpeg, so a relative path such as `sample:track.wav` can no longer be read as an FFmpeg protocol specifier.
 
-### Synchronization correctness
-- The synchronized track keeps its original sample rate unless 48 kHz is explicitly forced
-- Constant offsets now use exact delay/trim behavior in both directions
-- The compatibility `atempo` mode no longer distorts the first ten seconds for tiny offsets
-- FFprobe metadata and configured FFmpeg tool paths are validated strictly
+### Performance
+- Tool locations and the FFmpeg/FFprobe availability probe are cached, removing four process spawns per synchronization run
+- Analysis reads the decoded PCM once instead of twice; the measured peak stays bit-identical
+- qaac encoding scales its timeout with the input size instead of always aborting at 600 seconds
 
-### Engineering quality
-- Added the testable `SyncPipeline` orchestration layer
-- Added unit, synthetic-audio, real FFmpeg, GUI smoke, coverage, and Windows build checks
-- Added Python 3.10, 3.12, and 3.14 CI coverage on Linux, Windows, and macOS
-- Added weekly Dependabot updates and project metadata in `pyproject.toml`
+### Interface
+- The window no longer freezes for up to 15 seconds at startup or on the first run — the Deew badge and the Start button's tool checks moved to worker threads
+- The progress bar now reports the current stage and completion percentage
+- The mouse wheel scrolls the log box when the pointer is over it, instead of always scrolling the page
+- Background probes that finish after the window closes no longer call into a destroyed Tcl interpreter
 
 ---
 
 ## Türkçe
 
-### Güvenilirlik ve veri güvenliği
-- Çıktılar artık önce geçici dosyaya yazılıyor ve yalnızca doğrulamadan sonra atomik olarak tamamlanıyor
-- Hata veya iptal durumunda mevcut çıktılar ve girdi dosyaları korunuyor
-- Son kodlama başarısız olursa hata bildiriliyor ve çakışmayan `*.sync-fallback.wav` dosyası saklanıyor
-- FFmpeg, FFprobe, qaac ve Deew hataları artık başarılı işlem olarak gösterilemiyor
+### Güvenlik
+- **Dış araçlar artık çalışma dizininden çözülmüyor.** Windows'ta `shutil.which()` PATH'ten önce bulunduğu dizine bakıyor; bu yüzden içinde sahte bir `ffmpeg.exe` veya `ffprobe.exe` bulunan bir klasörden başlatılan uygulama kurulu olan yerine o dosyayı çalıştırıyordu. Araç araması artık yalnızca mutlak PATH girdilerini kabul ediyor, göreli PATH girdileri de atlanıyor.
+- Deew çalışma zamanı denetimleri kurulum dizini yerine kullanıcıya özel bir dizine yazıyor; kurulum dizini sistem geneli kurulumlarda salt okunur, PyInstaller paketinde ise geçiciydi.
+- Medya yolları FFmpeg'e ulaşmadan önce mutlak hale getiriliyor; böylece `sample:track.wav` gibi göreli bir yol FFmpeg protokol öneki olarak okunamıyor.
 
-### Senkronizasyon doğruluğu
-- 48 kHz açıkça zorlanmadıkça senkronize edilen sesin örnekleme oranı korunuyor
-- Sabit ofsetler iki yönde de kesin gecikme/kırpma olarak uygulanıyor
-- Geriye uyumlu `atempo` modu küçük ofsetlerde ilk on saniyeyi artık bozmuyor
-- FFprobe metadata bilgileri ile yapılandırılmış FFmpeg araç yolları sıkı biçimde doğrulanıyor
+### Performans
+- Araç konumları ve FFmpeg/FFprobe erişilebilirlik denetimi önbelleğe alınıyor; her senkronizasyon çalıştırmasından dört süreç başlatma kalkıyor
+- Analiz, decode edilmiş PCM'i iki kez yerine bir kez okuyor; ölçülen tepe değeri bit düzeyinde aynı kalıyor
+- qaac kodlaması her zaman 600 saniyede iptal etmek yerine zaman aşımını girdi boyutuna göre ölçekliyor
 
-### Mühendislik kalitesi
-- Test edilebilir `SyncPipeline` iş akışı katmanı eklendi
-- Birim, sentetik ses, gerçek FFmpeg, GUI smoke, coverage ve Windows build kontrolleri eklendi
-- Linux, Windows ve macOS üzerinde Python 3.10, 3.12 ve 3.14 CI matrisi eklendi
-- Haftalık Dependabot güncellemeleri ve `pyproject.toml` proje metadata bilgileri eklendi
+### Arayüz
+- Pencere artık açılışta veya ilk çalıştırmada 15 saniyeye kadar donmuyor — Deew rozeti ve Başlat düğmesinin araç denetimleri worker thread'lere taşındı
+- İlerleme çubuğu artık mevcut aşamayı ve tamamlanma yüzdesini gösteriyor
+- Fare tekerleği, imleç log kutusunun üzerindeyken sayfayı değil log kutusunu kaydırıyor
+- Pencere kapandıktan sonra biten arka plan denetimleri artık yok edilmiş Tcl yorumlayıcısına çağrı yapmıyor
 
 ---
 
 ## Installation / Kurulum
 
-**Windows**: Download `AudioSyncTool-v2.2.6-win64.zip` from the assets below.
+**Windows**: Download `AudioSyncTool-v2.3.0-win64.zip` from the assets below.
 
 **From source**:
 ```bash
