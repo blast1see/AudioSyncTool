@@ -134,6 +134,42 @@ def test_pipeline_rejects_both_input_paths_as_output(tmp_path: Path) -> None:
             SyncPipeline.validate_request(SyncRequest(source, sync, output))
 
 
+def test_relative_paths_become_absolute_before_reaching_ffmpeg(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """FFmpeg reads a leading ``name:`` on a relative path as a protocol."""
+    make_input(tmp_path / "sample:source.wav")
+    make_input(tmp_path / "sample:sync.wav")
+    monkeypatch.chdir(tmp_path)
+
+    normalized = SyncPipeline.normalize_request(
+        SyncRequest("sample:source.wav", "sample:sync.wav", "out.wav", skip_intro_sec=0)
+    )
+
+    for path in (
+        normalized.source_path,
+        normalized.sync_path,
+        normalized.output_path,
+    ):
+        assert Path(path).is_absolute()
+    assert Path(normalized.source_path).name == "sample:source.wav"
+
+
+def test_relative_input_matching_output_is_still_rejected(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The overwrite guard must survive a relative/absolute path mismatch."""
+    make_input(tmp_path / "source.wav")
+    make_input(tmp_path / "sync.wav")
+    monkeypatch.chdir(tmp_path)
+    pipeline = SyncPipeline(ffmpeg=FakeFFmpeg(), analyzer=FakeAnalyzer())
+
+    with pytest.raises(UnsafeOutputPathError):
+        pipeline.run(
+            SyncRequest("source.wav", "sync.wav", str(tmp_path / "source.wav"))
+        )
+
+
 def test_pipeline_preserves_existing_output_on_cancel(tmp_path: Path) -> None:
     source = make_input(tmp_path / "source.wav")
     sync = make_input(tmp_path / "sync.wav")

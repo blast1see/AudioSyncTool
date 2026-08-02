@@ -11,7 +11,6 @@ from __future__ import annotations
 import importlib.util
 import os
 import shlex
-import shutil
 import subprocess
 import sys
 import threading
@@ -28,7 +27,9 @@ from audio_sync.config import (
     DeewDRC,
     DeewFormat,
     get_deew_bitrate_key,
+    probe_cache_dir,
     resolve_tool,
+    which_on_path,
 )
 from audio_sync.core.process_runner import run_text_process
 
@@ -74,11 +75,7 @@ def _find_deew_executable() -> str | None:
         return str(local_deew_no_ext)
 
     # 3. Sistem PATH
-    system_deew = shutil.which("deew")
-    if system_deew:
-        return system_deew
-
-    return None
+    return which_on_path("deew")
 
 
 def _find_vendored_deew_module() -> str | None:
@@ -140,8 +137,10 @@ def _probe_backend_runtime(
     env_signature: tuple[tuple[str, str], ...] | None = None,
 ) -> tuple[bool, str]:
     """Return whether a deew backend can actually start."""
-    probe_root = Path(__file__).resolve().parent.parent.parent / ".deew_probe"
-    probe_root.mkdir(exist_ok=True)
+    try:
+        probe_root = probe_cache_dir()
+    except OSError as exc:
+        return False, f"{display_name} probe directory is not writable: {exc}"
 
     try:
         result = run_text_process(
@@ -202,6 +201,11 @@ def resolve_deew_backend() -> DeewBackend:
         "  2. Or replace the standalone deew.exe with a working release build\n"
         "  3. Then reopen the app so the runtime probe can pass"
     )
+
+
+def reset_deew_probe_cache() -> None:
+    """Forget cached runtime probes after the configured deew path changes."""
+    _probe_backend_runtime.cache_clear()
 
 
 def get_deew_runtime_status() -> tuple[bool, str]:
