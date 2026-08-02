@@ -72,8 +72,33 @@ def test_runtime_availability_requires_zero_exit(monkeypatch) -> None:
         "audio_sync.core.ffmpeg_wrapper.run_text_process",
         lambda *_args, **_kwargs: completed(stderr="cannot start", code=2),
     )
+    FFmpegWrapper.reset_availability_cache()
     with pytest.raises(OSError, match="cannot start"):
         FFmpegWrapper.check_availability()
+
+
+def test_availability_is_cached_per_resolved_binary(monkeypatch) -> None:
+    """Both the UI and the pipeline check availability; only probe once."""
+    calls: list[list[str]] = []
+    resolved = {"ffmpeg": "/opt/a/ffmpeg", "ffprobe": "/opt/a/ffprobe"}
+
+    def fake_run(cmd, **_kwargs):
+        calls.append(cmd)
+        return completed("version")
+
+    monkeypatch.setattr(
+        "audio_sync.core.ffmpeg_wrapper.resolve_tool", lambda name: resolved[name]
+    )
+    monkeypatch.setattr("audio_sync.core.ffmpeg_wrapper.run_text_process", fake_run)
+
+    FFmpegWrapper.check_availability()
+    FFmpegWrapper.check_availability()
+    assert len(calls) == 2
+
+    # Pointing at a different binary must re-probe rather than trust the cache.
+    resolved["ffmpeg"] = "/opt/b/ffmpeg"
+    FFmpegWrapper.check_availability()
+    assert len(calls) == 4
 
 
 @pytest.mark.parametrize(

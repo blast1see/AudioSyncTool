@@ -5,7 +5,7 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square)](https://github.com/blast1see/AudioSyncTool)
-[![Release](https://img.shields.io/badge/Release-v2.2.6-orange?style=flat-square)](https://github.com/blast1see/AudioSyncTool/releases)
+[![Release](https://img.shields.io/badge/Release-v2.3.0-orange?style=flat-square)](https://github.com/blast1see/AudioSyncTool/releases)
 
 **A robust audio delay detection and synchronization tool with a modern dark-themed GUI.**
 
@@ -54,6 +54,12 @@
 | **FFmpeg** | Required — must be in system PATH or set via Tool Paths |
 | **deew** | Optional — for AC3 / EAC3 encoding |
 | **qaac** | Optional — for Apple AAC encoding |
+
+> **Note on tool lookup.** External tools are only searched for in absolute `PATH`
+> directories. The folder the app happens to be launched from is deliberately
+> excluded, so a stray `ffmpeg.exe` sitting next to your media files can never be
+> executed in place of the installed one. If a tool lives outside `PATH`, point at
+> it explicitly with **Tool Paths**.
 
 ### Installation
 
@@ -290,6 +296,12 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed list of changes in each version.
 | **FFmpeg** | Gerekli — sistem PATH'inde bulunmalı veya Tool Paths ile ayarlanmalı |
 | **deew** | İsteğe bağlı — AC3 / EAC3 kodlama için |
 | **qaac** | İsteğe bağlı — Apple AAC kodlama için |
+
+> **Araç araması hakkında not.** Dış araçlar yalnızca mutlak `PATH` dizinlerinde
+> aranır. Uygulamanın başlatıldığı klasör bilinçli olarak dışarıda bırakılmıştır;
+> böylece medya dosyalarınızın yanında duran başıboş bir `ffmpeg.exe`, kurulu olanın
+> yerine asla çalıştırılamaz. Bir araç `PATH` dışındaysa **Tool Paths** ile doğrudan
+> yolunu belirtin.
 
 ### Kurulum
 
