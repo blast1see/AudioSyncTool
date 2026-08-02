@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -8,7 +10,13 @@ import pytest
 from audio_sync import config
 from audio_sync.config import ToolPaths
 from audio_sync.core.models import OutputSampleRate
-from audio_sync.utils import parse_float, parse_int, short_name, validate_file
+from audio_sync.utils import (
+    parse_float,
+    parse_int,
+    scale_timeout_for_size,
+    short_name,
+    validate_file,
+)
 
 
 def test_numeric_parsing_and_clamping() -> None:
@@ -83,12 +91,102 @@ def test_resolve_tool_prefers_custom_then_path(tmp_path: Path, monkeypatch) -> N
     assert config.resolve_tool("ffmpeg") == str(custom)
 
     monkeypatch.setattr(config, "TOOL_PATHS", ToolPaths())
-    monkeypatch.setattr(config.shutil, "which", lambda name: f"/tools/{name}")
-    assert config.resolve_tool("ffprobe") == "/tools/ffprobe"
+    monkeypatch.setattr(config, "which_on_path", lambda name: f"/tools/{name}")
+    assert config.resolve_tool("ffprobe") == os.path.abspath("/tools/ffprobe")
 
 
 def test_resolve_missing_qaac_is_actionable(monkeypatch) -> None:
     monkeypatch.setattr(config, "TOOL_PATHS", ToolPaths())
-    monkeypatch.setattr(config.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(config, "which_on_path", lambda _name: None)
     with pytest.raises(OSError, match="qaac not found"):
         config.resolve_tool("qaac")
+
+
+def test_resolve_tool_memoizes_lookups(monkeypatch) -> None:
+    lookups: list[str] = []
+
+    def counting_lookup(name: str) -> str:
+        lookups.append(name)
+        return f"/tools/{name}"
+
+    monkeypatch.setattr(config, "TOOL_PATHS", ToolPaths())
+    monkeypatch.setattr(config, "which_on_path", counting_lookup)
+
+    first = config.resolve_tool("ffmpeg")
+    monkeypatch.setattr(config, "_is_executable_file", lambda _path: True)
+    assert config.resolve_tool("ffmpeg") == first
+    assert lookups == ["ffmpeg"]
+
+    config.invalidate_tool_cache()
+    assert config.resolve_tool("ffmpeg") == first
+    assert lookups == ["ffmpeg", "ffmpeg"]
+
+
+def test_path_lookup_ignores_working_directory(tmp_path: Path, monkeypatch) -> None:
+    """A planted binary in the CWD must never win over a real PATH entry."""
+    planted_dir = tmp_path / "downloads"
+    planted_dir.mkdir()
+    real_dir = tmp_path / "bin"
+    real_dir.mkdir()
+
+    suffix = ".EXE" if sys.platform == "win32" else ""
+    planted = planted_dir / f"ffmpeg{suffix}"
+    planted.write_bytes(b"planted")
+    planted.chmod(0o755)
+    real = real_dir / f"ffmpeg{suffix}"
+    real.write_bytes(b"real")
+    real.chmod(0o755)
+
+    monkeypatch.chdir(planted_dir)
+    monkeypatch.setenv("PATH", str(real_dir))
+    # Windows only skips the CWD when this guard is set; clear it so the test
+    # exercises the configuration a double-clicked .exe actually runs under.
+    monkeypatch.delenv("NoDefaultCurrentDirectoryInExePath", raising=False)
+    monkeypatch.setattr(config, "TOOL_PATHS", ToolPaths())
+
+    assert config.which_on_path("ffmpeg") == str(real)
+    assert config.resolve_tool("ffmpeg") == str(real)
+
+
+def test_path_lookup_skips_relative_path_entries(tmp_path: Path, monkeypatch) -> None:
+    """Relative PATH entries are attacker-controllable and must be ignored."""
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    suffix = ".EXE" if sys.platform == "win32" else ""
+    planted = workdir / f"ffprobe{suffix}"
+    planted.write_bytes(b"planted")
+    planted.chmod(0o755)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PATH", os.pathsep.join(("work", ".", "")))
+
+    assert config.which_on_path("ffprobe") is None
+
+
+def test_probe_cache_dir_lives_under_user_settings(tmp_path: Path, monkeypatch) -> None:
+    """Runtime probes must not write inside the installation tree."""
+    monkeypatch.setattr(config, "_TOOL_PATHS_DIR", tmp_path / "settings")
+    monkeypatch.setattr(config, "_PROBE_CACHE_DIR", tmp_path / "settings" / "probe")
+
+    probe_dir = config.probe_cache_dir()
+    assert probe_dir.is_dir()
+    assert probe_dir == tmp_path / "settings" / "probe"
+
+
+def test_scale_timeout_grows_with_input_size(tmp_path: Path) -> None:
+    small = tmp_path / "small.wav"
+    small.write_bytes(b"\0" * 1024)
+
+    assert scale_timeout_for_size(
+        60, str(small), per_gib_sec=100, max_sec=600
+    ) == 60
+    assert scale_timeout_for_size(
+        60, str(small), per_gib_sec=100, max_sec=600, extra_sec=90
+    ) == 150
+    assert scale_timeout_for_size(
+        60, str(small), per_gib_sec=100, max_sec=600, extra_sec=10_000
+    ) == 600
+    # A missing file must not blow up or shrink the base budget.
+    assert scale_timeout_for_size(
+        60, str(tmp_path / "missing.wav"), per_gib_sec=100, max_sec=600
+    ) == 60

@@ -6,7 +6,7 @@ import os
 import shutil
 import tempfile
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -108,6 +108,7 @@ class SyncPipeline:
         log = on_log or (lambda _message: None)
         progress = on_progress or (lambda _percent: None)
 
+        request = self.normalize_request(request)
         self.validate_request(request)
         FFmpegWrapper.check_availability()
         self._check_cancelled(cancel_event)
@@ -236,6 +237,27 @@ class SyncPipeline:
                 )
         finally:
             staged_output.unlink(missing_ok=True)
+
+    @staticmethod
+    def normalize_request(request: SyncRequest) -> SyncRequest:
+        """Return a request whose media paths are absolute.
+
+        FFmpeg reads a leading ``name:`` on a *relative* path as a protocol
+        specifier, so ``sample:track.wav`` would be routed to the ``sample``
+        protocol instead of the file. Absolute paths also make the
+        output-overwrites-input check reliable regardless of the working
+        directory the app happens to be launched from.
+        """
+        return replace(
+            request,
+            source_path=SyncPipeline._absolute_path(request.source_path),
+            sync_path=SyncPipeline._absolute_path(request.sync_path),
+            output_path=SyncPipeline._absolute_path(request.output_path),
+        )
+
+    @staticmethod
+    def _absolute_path(path: str) -> str:
+        return str(Path(path).expanduser().absolute())
 
     @staticmethod
     def validate_request(request: SyncRequest) -> None:

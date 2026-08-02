@@ -45,7 +45,11 @@ from audio_sync.config import (
     resolve_tool,
     save_tool_paths,
 )
-from audio_sync.core.deew_encoder import get_deew_runtime_status, resolve_deew_backend
+from audio_sync.core.deew_encoder import (
+    get_deew_runtime_status,
+    reset_deew_probe_cache,
+    resolve_deew_backend,
+)
 from audio_sync.core.encoder import QaacEncoder
 from audio_sync.core.ffmpeg_wrapper import FFmpegWrapper
 from audio_sync.core.models import (
@@ -127,6 +131,15 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._processing_lock = threading.Lock()
         self._cancel_event = threading.Event()
 
+        # Deew availability is probed off the UI thread; ``None`` = not yet known.
+        self._deew_available: bool | None = None
+        self._deew_probe_running: bool = False
+
+        # Set once teardown starts so worker threads stop scheduling callbacks
+        # into an interpreter that is going away.
+        self._closing: bool = False
+        self._pending_after_ids: set[str] = set()
+
         # Kullanıcı ayarları
         self.skip_intro_var = tk.StringVar(value="120")
         self.segment_count_var = tk.StringVar(value="12")
@@ -190,7 +203,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._build_encoding_panel()
         self._build_info_panel()
         self._build_log_panel()
-        self.after(50, self._fit_to_content)
+        self.schedule_later(50, self._fit_to_content)
 
     def _build_scrollable_container(self) -> None:
         """Kaydırılabilir ana kapsayıcıyı oluşturur."""
@@ -240,10 +253,25 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             self._scrollbar.pack_forget()
             self._scrollbar_visible = False
 
+    def _scrolls_itself(self, widget: object) -> bool:
+        """Report whether the pointer is over a widget that scrolls on its own.
+
+        ``bind_all`` is the only reliable way to catch the wheel across every
+        child, but forwarding every event to the outer canvas stole scrolling
+        from the log box. Anything with its own ``yview`` handles it instead.
+        """
+        return isinstance(widget, (tk.Text, tk.Listbox)) or (
+            widget is not self._canvas and isinstance(widget, tk.Canvas)
+        )
+
     def _on_mousewheel(self, event: tk.Event) -> None:  # type: ignore[type-arg]
+        if self._scrolls_itself(getattr(event, "widget", None)):
+            return
         self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def _on_mousewheel_linux(self, event: tk.Event) -> None:  # type: ignore[type-arg]
+        if self._scrolls_itself(getattr(event, "widget", None)):
+            return
         if event.num == 4:
             self._canvas.yview_scroll(-1, "units")
         elif event.num == 5:
@@ -1050,7 +1078,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         elif value == EncodingPipeline.DEEW.value:
             self._deew_enc_frame.pack(fill="x", pady=(0, 4))
 
-        self.after(50, self._fit_to_content)
+        self.schedule_later(50, self._fit_to_content)
 
     def _on_ffmpeg_format_change(self, value: str) -> None:
         """Show/hide FFmpeg format-specific fields."""
@@ -1073,7 +1101,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             self._ffmpeg_lossy_frame.pack(fill="x", padx=14, pady=(0, 4))
             self._ffmpeg_channel_frame.pack(fill="x", padx=14, pady=(0, 4))
 
-        self.after(50, self._fit_to_content)
+        self.schedule_later(50, self._fit_to_content)
 
     def _on_qaac_mode_change(self, value: str) -> None:
         """Show/hide qaac mode-specific fields."""
@@ -1091,7 +1119,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         elif value == QaacMode.CBR.flag:
             self._qaac_cbr_frame.pack(fill="x", padx=14, pady=(0, 4))
 
-        self.after(50, self._fit_to_content)
+        self.schedule_later(50, self._fit_to_content)
 
     def _build_info_panel(self) -> None:
         """Bilgi panelini oluşturur."""
@@ -1171,10 +1199,25 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self.progress_canvas = tk.Canvas(
             self._bottom_bar, height=4, bg=THEME.border, highlightthickness=0,
         )
-        self.progress_canvas.pack(fill="x", padx=30, pady=(8, 6))
+        self.progress_canvas.pack(fill="x", padx=30, pady=(8, 2))
         self._progress_bar = self.progress_canvas.create_rectangle(
             0, 0, 0, 4, fill=THEME.accent, outline="",
         )
+
+        # Aşama ve yüzde göstergesi — çubuk tek başına ne kadar kaldığını
+        # söylemiyordu, uzun işlemlerde takıldı izlenimi veriyordu.
+        status_row = tk.Frame(self._bottom_bar, bg=THEME.bg)
+        status_row.pack(fill="x", padx=30, pady=(0, 6))
+        self._status_lbl = tk.Label(
+            status_row, text="", font=FONTS.small,
+            fg=THEME.muted, bg=THEME.bg, anchor="w",
+        )
+        self._status_lbl.pack(side="left")
+        self._percent_lbl = tk.Label(
+            status_row, text="", font=FONTS.small,
+            fg=THEME.muted, bg=THEME.bg, anchor="e",
+        )
+        self._percent_lbl.pack(side="right")
 
         # Analiz butonu
         self.analyze_btn = tk.Button(
@@ -1333,6 +1376,11 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                 deew=path_vars["deew"].get().strip() or None,
             )
             ok = save_tool_paths(paths)
+            # The new paths may point at entirely different binaries, so drop
+            # every memoized probe result before re-reporting status.
+            FFmpegWrapper.reset_availability_cache()
+            reset_deew_probe_cache()
+            self._deew_available = None
             _update_statuses()
             self._update_deew_status()
             if not ok:
@@ -1486,7 +1534,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             self._fps_settings_frame.pack(fill="x", padx=14, pady=(0, 10))
         else:
             self._fps_settings_frame.pack_forget()
-        self.after(50, self._fit_to_content)
+        self.schedule_later(50, self._fit_to_content)
 
     def _on_fps_conversion_change(self, *_args: object) -> None:
         self._update_fps_ratio_label()
@@ -1518,11 +1566,40 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
     # ── Deew UI Yardımcıları ─────────────────────────────────────────────
 
     def _update_deew_status(self) -> None:
-        deew_ok, _detail = get_deew_runtime_status()
-        if deew_ok:
+        """Refresh the deew badge without blocking the event loop.
+
+        Resolving the backend starts deew with a 15 s timeout; doing that
+        inline froze the window during startup and on every language switch.
+        """
+        if self._deew_available is None:
+            self._deew_status_lbl.config(text=t("deew_checking"), fg=THEME.muted)
+            self._probe_deew_status_async()
+            return
+
+        if self._deew_available:
             self._deew_status_lbl.config(text=t("deew_ready"), fg="#4ade80")
         else:
             self._deew_status_lbl.config(text=t("deew_unavailable"), fg=THEME.accent2)
+
+    def _probe_deew_status_async(self) -> None:
+        """Run the deew runtime probe on a worker thread."""
+        if self._deew_probe_running:
+            return
+        self._deew_probe_running = True
+
+        def _probe() -> None:
+            try:
+                available, _detail = get_deew_runtime_status()
+            except Exception:
+                available = False
+            self.schedule(lambda: self._on_deew_status_probed(available))
+
+        threading.Thread(target=_probe, daemon=True).start()
+
+    def _on_deew_status_probed(self, available: bool) -> None:
+        self._deew_probe_running = False
+        self._deew_available = available
+        self._update_deew_status()
 
     def _on_deew_toggle(self) -> None:
         """Legacy no-op — Deew visibility is now controlled by the pipeline dropdown."""
@@ -1713,7 +1790,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         zone = self.zone_src if role == "src" else self.zone_sync
 
         # Show loading state
-        zone._name_lbl.config(text=t("mkv_extracting"), fg=THEME.muted)
+        zone.show_status(t("mkv_extracting"))
 
         def _probe_thread() -> None:
             """Background: probe streams."""
@@ -1722,7 +1799,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             except Exception:
                 streams = []
             # Back to main thread for dialog
-            self.after(0, lambda: self._container_on_probed(path, role, streams))
+            self.schedule(lambda: self._container_on_probed(path, role, streams))
 
         threading.Thread(target=_probe_thread, daemon=True).start()
 
@@ -1734,7 +1811,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
 
         if not streams:
             messagebox.showwarning(t("mkv_select_title"), t("mkv_no_audio"))
-            zone._name_lbl.config(text=t("no_file_selected"), fg=THEME.muted)
+            zone.clear_selection()
             setattr(self, f"_extracting_{role}", False)
             return
 
@@ -1748,7 +1825,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                 self, streams, os.path.basename(path),
             )
             if stream_index is None:
-                zone._name_lbl.config(text=t("no_file_selected"), fg=THEME.muted)
+                zone.clear_selection()
                 setattr(self, f"_extracting_{role}", False)
                 return
 
@@ -1761,7 +1838,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
 
         # Start extraction in background
         self._log(t("mkv_extracting"))
-        zone._name_lbl.config(text=t("mkv_extracting"), fg=THEME.muted)
+        zone.show_status(t("mkv_extracting"))
 
         def _extract_thread() -> None:
             """Background: extract audio stream."""
@@ -1782,12 +1859,12 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             try:
                 self._ffmpeg.extract_audio_stream(path, tmp_path, stream_index)
                 # Back to main thread to update UI
-                self.after(0, lambda: self._container_on_extracted(
+                self.schedule(lambda: self._container_on_extracted(
                     tmp_path, role,
                 ))
             except Exception as exc:
                 error_text = str(exc)
-                self.after(0, lambda: self._container_on_extract_error(
+                self.schedule(lambda: self._container_on_extract_error(
                     error_text, tmp_path, role,
                 ))
 
@@ -1822,7 +1899,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         zone = self.zone_src if role == "src" else self.zone_sync
 
         self._log(t("mkv_extract_error", err=error))
-        zone._name_lbl.config(text=t("no_file_selected"), fg=THEME.muted)
+        zone.clear_selection()
 
         if os.path.isfile(tmp_path):
             try:
@@ -1834,9 +1911,43 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
 
     # ── Cleanup ──────────────────────────────────────────────────────────
 
+    def schedule(self, callback: Callable[[], None]) -> None:
+        """Run ``callback`` on the UI thread, ignoring it after teardown.
+
+        Background probes outlive the window when the user closes it mid-run,
+        and ``after()`` on a destroyed interpreter raises from the worker
+        thread — which leaves the Tcl side in an unusable state.
+        """
+        if self._closing:
+            return
+        try:
+            self.after(0, callback)
+        except (tk.TclError, RuntimeError):
+            pass
+
+    def schedule_later(self, delay_ms: int, callback: Callable[[], None]) -> None:
+        """Schedule a delayed callback, remembering it so teardown can cancel it."""
+        if self._closing:
+            return
+        try:
+            self._pending_after_ids.add(self.after(delay_ms, callback))
+        except (tk.TclError, RuntimeError):
+            pass
+
+    def _cancel_pending_callbacks(self) -> None:
+        """Drop timers that would otherwise fire into a destroyed interpreter."""
+        for after_id in self._pending_after_ids:
+            try:
+                self.after_cancel(after_id)
+            except (tk.TclError, RuntimeError, ValueError):
+                pass
+        self._pending_after_ids.clear()
+
     def destroy(self) -> None:
         """Clean up temporary container extraction files on exit."""
+        self._closing = True
         self._cancel_event.set()
+        self._cancel_pending_callbacks()
         for tmp in getattr(self, "_container_temp_files", []):
             try:
                 if os.path.isfile(tmp):
@@ -1853,7 +1964,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             self.log_box.config(state="normal")
             self.log_box.delete("1.0", "end")
             self.log_box.config(state="disabled")
-        self.after(0, _do)
+        self.schedule(_do)
 
     def _cancel_processing(self) -> None:
         """Request cancellation for the current background operation."""
@@ -1865,7 +1976,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
 
         self._cancel_event.set()
         self._log(t("log_cancel_requested"))
-        self.after(0, lambda: self.cancel_btn.config(state="disabled", text=t("canceling")))
+        self.schedule(lambda: self.cancel_btn.config(state="disabled", text=t("canceling")))
 
     def _check_cancelled(self) -> None:
         """Raise a dedicated exception if the user requested cancellation."""
@@ -2148,7 +2259,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             self._log(t("analyze_result_header"))
             self._log("")
 
-            self.after(0, lambda: self._display_analysis_result(result))
+            self.schedule(lambda: self._display_analysis_result(result))
 
             self._set_progress(100)
             self._log(t("analyze_complete"))
@@ -2175,7 +2286,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                 self.cancel_btn.config(state="disabled", text=t("btn_cancel"))
                 self.run_btn.config(state="normal", text=t("start_sync"))
 
-            self.after(0, _restore)
+            self.schedule(_restore)
 
     def _start(self) -> None:
         """Senkronizasyon işlemini başlatır."""
@@ -2190,23 +2301,60 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             return
 
         try:
-            FFmpegWrapper.check_availability()
-        except OSError as e:
-            messagebox.showerror(t("ffmpeg_not_found_title"), str(e))
+            validate_file(self._src_path, t("source_audio"))
+            validate_file(self._sync_path, t("sync_audio"))
+        except (FileNotFoundError, PermissionError, ValueError) as e:
+            messagebox.showerror(t("file_error_title"), str(e))
             self._reset_processing()
             return
 
-        deew_enabled = (self._encoding_pipeline_var.get() == EncodingPipeline.DEEW.value)
+        # External tool checks each start a process, so run them off the event
+        # loop and resume on the main thread once they answer.
+        pipeline = self._encoding_pipeline_var.get()
+        self.run_btn.config(state="disabled", text=t("checking_tools"))
+        self.analyze_btn.config(state="disabled")
+        threading.Thread(
+            target=self._preflight_tools,
+            args=(pipeline,),
+            daemon=True,
+        ).start()
 
-        if deew_enabled:
+    def _preflight_tools(self, pipeline: str) -> None:
+        """Worker thread: verify every external tool the run will need."""
+        try:
+            FFmpegWrapper.check_availability()
+        except OSError as exc:
+            self._fail_preflight(t("ffmpeg_not_found_title"), str(exc))
+            return
+
+        if pipeline == EncodingPipeline.DEEW.value:
             try:
                 resolve_deew_backend()
-            except OSError as e:
-                messagebox.showerror(t("deew_not_found_title"), str(e))
-                self._reset_processing()
+            except OSError as exc:
+                self._fail_preflight(t("deew_not_found_title"), str(exc))
                 return
 
-        # Encoding pipeline availability checks
+        if pipeline == EncodingPipeline.QAAC.value:
+            ok, detail = QaacEncoder.check_availability()
+            if not ok:
+                self._fail_preflight("qaac", detail)
+                return
+
+        self.schedule(self._continue_start)
+
+    def _fail_preflight(self, title: str, message: str) -> None:
+        """Report a failed tool check and hand the buttons back."""
+        def _show() -> None:
+            self._reset_processing()
+            self.run_btn.config(state="normal", text=t("start_sync"))
+            self.analyze_btn.config(state="normal", text=t("analyze_only"))
+            messagebox.showerror(title, message)
+
+        self.schedule(_show)
+
+    def _continue_start(self) -> None:
+        """Main thread: collect settings, ask for the output path, then run."""
+        deew_enabled = (self._encoding_pipeline_var.get() == EncodingPipeline.DEEW.value)
         pipeline = self._encoding_pipeline_var.get()
         ffmpeg_format = self._get_selected_ffmpeg_format()
         ffmpeg_lossy_default = (
@@ -2215,21 +2363,6 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             else FFMPEG_AC3_DEFAULT_BITRATE
         )
         ffmpeg_downmix = self._get_selected_ffmpeg_downmix()
-
-        if pipeline == EncodingPipeline.QAAC.value:
-            ok, msg = QaacEncoder.check_availability()
-            if not ok:
-                messagebox.showerror("qaac", msg)
-                self._reset_processing()
-                return
-
-        try:
-            validate_file(self._src_path, t("source_audio"))
-            validate_file(self._sync_path, t("sync_audio"))
-        except (FileNotFoundError, PermissionError, ValueError) as e:
-            messagebox.showerror(t("file_error_title"), str(e))
-            self._reset_processing()
-            return
 
         # ── Capture encoding params on main thread (thread-safe) ──
         encoding_params: dict = {
@@ -2309,6 +2442,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         )
         if not out_path:
             self._reset_processing()
+            self.run_btn.config(state="normal", text=t("start_sync"))
+            self.analyze_btn.config(state="normal", text=t("analyze_only"))
             return
 
         skip_sec = parse_float(self.skip_intro_var.get(), default=120.0, minimum=0.0, maximum=3600.0)
@@ -2487,8 +2622,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                         summary=outcome.encoding_summary,
                     )
                 )
-            self.after(
-                0,
+            self.schedule(
                 lambda: messagebox.showinfo(
                     t("success_title"),
                     t("file_saved_msg", path=outcome.output_path),
@@ -2505,14 +2639,12 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                         name=os.path.basename(exc.fallback_path),
                     )
                 )
-            self.after(
-                0,
+            self.schedule(
                 lambda err=str(exc): messagebox.showerror(t("error_title"), err),
             )
         except Exception as exc:
             self._log(t("log_error", err=exc))
-            self.after(
-                0,
+            self.schedule(
                 lambda err=str(exc): messagebox.showerror(t("error_title"), err),
             )
         finally:
@@ -2525,22 +2657,22 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                 self.cancel_btn.config(state="disabled", text=t("btn_cancel"))
                 self.run_btn.config(state="normal", text=t("start_sync"))
 
-            self.after(0, _restore_buttons)
+            self.schedule(_restore_buttons)
 
     def _reset_processing(self) -> None:
         with self._processing_lock:
             self._processing = False
         self._cancel_event.clear()
-        self.after(0, lambda: self.cancel_btn.config(state="disabled", text=t("btn_cancel")))
+        self.schedule(lambda: self.cancel_btn.config(state="disabled", text=t("btn_cancel")))
 
     # ── Bilgi Gösterimi ──────────────────────────────────────────────────
 
     def _update_info_panel(self, sync_info: AudioInfo, output_sr: OutputSampleRate) -> None:
-        self.after(0, lambda: self.ch_val.config(text=t("channel_info", ch=sync_info.channels)))
-        self.after(0, lambda: self.bit_val.config(
+        self.schedule(lambda: self.ch_val.config(text=t("channel_info", ch=sync_info.channels)))
+        self.schedule(lambda: self.bit_val.config(
             text=f"{sync_info.bits}-bit  →  {sync_info.codec.codec_name}",
         ))
-        self.after(0, lambda: self.sr_val.config(text=output_sr.label))
+        self.schedule(lambda: self.sr_val.config(text=output_sr.label))
 
     def _log_audio_info(
         self,
@@ -2562,8 +2694,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             relation = t("sync_behind")
         label_color = THEME.accent if result.delay_ms >= 0 else THEME.accent2
 
-        self.after(
-            0,
+        self.schedule(
             lambda: self.delay_val.config(
                 text=f"{abs(result.delay_ms):.1f} ms  ({relation})",
                 fg=label_color,
@@ -2596,15 +2727,30 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             self.log_box.see("end")
             self.log_box.config(state="disabled")
 
-        self.after(0, _write)
+        self.schedule(_write)
+        # The newest log line doubles as the current-stage caption.
+        if msg.strip():
+            self._set_status(msg.strip())
+
+    def _set_status(self, text: str) -> None:
+        """Show the current stage next to the progress bar."""
+        caption = text if len(text) <= 56 else f"{text[:55]}…"
+
+        def _write() -> None:
+            self._status_lbl.config(text=caption)
+
+        self.schedule(_write)
 
     def _set_progress(self, pct: int) -> None:
+        pct = max(0, min(100, int(pct)))
+
         def _draw() -> None:
             w = self.progress_canvas.winfo_width()
             x = int(w * pct / 100)
             self.progress_canvas.coords(self._progress_bar, 0, 0, x, 4)
+            self._percent_lbl.config(text=f"%{pct}" if pct else "")
 
-        self.after(0, _draw)
+        self.schedule(_draw)
 
     def _fit_to_content(self) -> None:
         """Update scroll region without changing window size."""

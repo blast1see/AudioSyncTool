@@ -29,6 +29,11 @@ from audio_sync.config import (
 )
 from audio_sync.core.models import AudioInfo, AudioProbeError, OutputSampleRate
 from audio_sync.core.process_runner import run_binary_process, run_text_process
+from audio_sync.utils import scale_timeout_for_size
+
+# Cached ``ffmpeg``/``ffprobe`` locations that already answered ``-version``.
+_AVAILABILITY_LOCK = threading.Lock()
+_AVAILABILITY_VERIFIED: tuple[str | None, str | None] | None = None
 
 # ── Komut Çalıştırıcı Protokolü ─────────────────────────────────────────────
 
@@ -98,12 +103,30 @@ class FFmpegWrapper:
     # ── Bağımlılık Kontrolü ──────────────────────────────────────────────
 
     @staticmethod
+    def reset_availability_cache() -> None:
+        """Forget the cached probe so the next check re-runs the binaries."""
+        global _AVAILABILITY_VERIFIED
+        with _AVAILABILITY_LOCK:
+            _AVAILABILITY_VERIFIED = None
+
+    @staticmethod
     def check_availability() -> None:
         """FFmpeg ve FFprobe'un sistemde kurulu olduğunu doğrular.
+
+        Her çağrı iki alt süreç başlattığından, başarılı sonuç önbelleğe
+        alınır; araç yolları değişince :func:`reset_availability_cache`
+        ile geçersiz kılınır.
 
         Raises:
             OSError: Araçlardan biri bulunamazsa.
         """
+        global _AVAILABILITY_VERIFIED
+
+        signature = FFmpegWrapper._availability_signature()
+        with _AVAILABILITY_LOCK:
+            if _AVAILABILITY_VERIFIED == signature:
+                return
+
         for tool in ("ffmpeg", "ffprobe"):
             try:
                 binary = resolve_tool(tool)
@@ -125,6 +148,20 @@ class FFmpegWrapper:
                     f"  Linux:   sudo apt install ffmpeg\n"
                     f"Details: {exc}"
                 ) from exc
+
+        with _AVAILABILITY_LOCK:
+            _AVAILABILITY_VERIFIED = signature
+
+    @staticmethod
+    def _availability_signature() -> tuple[str | None, str | None]:
+        """Identify the exact binaries a cached success belongs to."""
+        signature: list[str | None] = []
+        for tool in ("ffmpeg", "ffprobe"):
+            try:
+                signature.append(resolve_tool(tool))
+            except OSError:
+                signature.append(None)
+        return signature[0], signature[1]
 
     # ── Ses Bilgisi Okuma ────────────────────────────────────────────────
 
@@ -975,6 +1012,10 @@ class FFmpegWrapper:
             RuntimeError: If encoding fails
         """
         compression = max(0, min(12, compression))
+        # FFmpeg's FLAC encoder only accepts s16 and s32/24-bit output, so snap
+        # anything else to the nearest supported depth instead of silently
+        # dropping the flag and writing whatever the decoder produced.
+        effective_bit_depth = 16 if bit_depth <= 20 else 24
         cmd = [
             resolve_tool("ffmpeg"),
             "-v", "error",
@@ -988,9 +1029,9 @@ class FFmpegWrapper:
             cmd.extend(["-ac", str(channels)])
 
         # Add bit depth (sample format)
-        if bit_depth == 16:
+        if effective_bit_depth == 16:
             cmd.extend(["-sample_fmt", "s16"])
-        elif bit_depth == 24:
+        else:
             cmd.extend(["-sample_fmt", "s32", "-bits_per_raw_sample", "24"])
 
         cmd.append(output_path)
@@ -1004,7 +1045,7 @@ class FFmpegWrapper:
             stderr_tail = result.stderr[-600:] if result.stderr else "(stderr empty)"
             raise RuntimeError(f"FFmpeg FLAC encoding error:\n{stderr_tail}")
 
-        return f"FLAC (compression={compression}, {bit_depth}-bit)"
+        return f"FLAC (compression={compression}, {effective_bit_depth}-bit)"
 
     def encode_to_opus(
         self,
@@ -1131,31 +1172,23 @@ class FFmpegWrapper:
 
     def _get_ffmpeg_timeout(self, *input_paths: str) -> int:
         """Scale FFmpeg timeout for large or slow-to-decode audio inputs."""
-        timeout = self._config.ffmpeg_timeout_sec
         complex_exts = {
             ".thd", ".dtshd", ".dts", ".mka",
             ".mkv", ".mp4", ".m4v", ".webm", ".ts", ".mts",
         }
 
-        extra_sec = 0
-        for path in input_paths:
-            if not path:
-                continue
+        bonus_sec = sum(
+            self._config.ffmpeg_complex_format_bonus_sec
+            for path in input_paths
+            if path and os.path.splitext(path)[1].lower() in complex_exts
+        )
 
-            ext = os.path.splitext(path)[1].lower()
-            if ext in complex_exts:
-                extra_sec += self._config.ffmpeg_complex_format_bonus_sec
-
-            try:
-                size_gib = os.path.getsize(path) / (1024 ** 3)
-            except OSError:
-                continue
-
-            extra_sec += int(size_gib * self._config.ffmpeg_timeout_per_gib_sec)
-
-        return min(
-            self._config.ffmpeg_max_timeout_sec,
-            max(timeout, timeout + extra_sec),
+        return scale_timeout_for_size(
+            self._config.ffmpeg_timeout_sec,
+            *input_paths,
+            per_gib_sec=self._config.ffmpeg_timeout_per_gib_sec,
+            max_sec=self._config.ffmpeg_max_timeout_sec,
+            extra_sec=bonus_sec,
         )
 
     @staticmethod
