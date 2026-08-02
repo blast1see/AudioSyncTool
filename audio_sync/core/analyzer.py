@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import warnings
 from dataclasses import dataclass, field, replace
@@ -1267,28 +1268,40 @@ class AudioAnalyzer:
                     break
 
     def _measure_pcm_normalization(self, pcm_path: str) -> tuple[float, float]:
+        """Return the DC offset and the peak of the centred signal.
+
+        ``max|x - mean|`` is always attained at one of the two extremes of
+        ``x``, so tracking a running min/max lets this read the decoded PCM
+        once instead of twice — the file is roughly 2 MB per audio minute and
+        both channels are measured, so the second pass was the single largest
+        chunk of avoidable I/O in the analysis stage.
+        """
         total_sum = 0.0
         total_count = 0
-        chunk_size = self._chunk_size_samples()
+        minimum = math.inf
+        maximum = -math.inf
 
-        for chunk in self._iter_pcm_file_chunks(pcm_path, chunk_size):
+        for chunk in self._iter_pcm_file_chunks(pcm_path, self._chunk_size_samples()):
             scaled = chunk.astype(ANALYSIS_DTYPE)
             scaled *= _INT16_SCALE
             total_sum += float(np.sum(scaled, dtype=np.float64))
             total_count += scaled.size
+            minimum = min(minimum, float(np.min(scaled)))
+            maximum = max(maximum, float(np.max(scaled)))
 
         if total_count == 0:
             raise RuntimeError("Mono decode returned an empty PCM buffer.")
 
         mean = total_sum / total_count
-
-        peak = 0.0
-        for chunk in self._iter_pcm_file_chunks(pcm_path, chunk_size):
-            scaled = chunk.astype(ANALYSIS_DTYPE)
-            scaled *= _INT16_SCALE
-            scaled -= ANALYSIS_DTYPE(mean)
-            local_peak = float(np.max(np.abs(scaled))) if scaled.size else 0.0
-            peak = max(peak, local_peak)
+        # Reproduce the float32 subtraction the streaming stage performs so the
+        # peak stays bit-identical to a per-sample scan.
+        centred_mean = ANALYSIS_DTYPE(mean)
+        peak = float(
+            max(
+                abs(ANALYSIS_DTYPE(maximum) - centred_mean),
+                abs(ANALYSIS_DTYPE(minimum) - centred_mean),
+            )
+        )
 
         return mean, peak if peak > 1e-9 else 1.0
 

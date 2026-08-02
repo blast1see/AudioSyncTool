@@ -8,6 +8,28 @@
 
 ### Unreleased
 
+### [2.3.0] - 2026-08-02
+
+#### Security
+- **External tools are no longer resolved from the working directory.** On Windows `shutil.which()` searches the current directory before PATH, so launching the app from a folder containing a planted `ffmpeg.exe` or `ffprobe.exe` ran that binary. Tool lookup now only considers absolute PATH entries, and relative PATH entries are ignored as well.
+- Deew runtime probes write to a per-user directory instead of the installation tree, which is read-only for system-wide installs and ephemeral inside a PyInstaller bundle.
+- Media paths are made absolute before reaching FFmpeg, so a relative path such as `sample:track.wav` can no longer be interpreted as an FFmpeg protocol specifier.
+
+#### Added
+- Progress bar now reports the current stage and completion percentage.
+- `DropZone.show_status()` / `clear_selection()` for callers that need to change the zone caption.
+
+#### Changed
+- Tool locations and the FFmpeg/FFprobe availability probe are memoized, removing four process spawns per synchronization run; both are invalidated when tool paths change.
+- The Deew availability badge and the Start button's tool checks run on worker threads, so the window no longer freezes for up to 15 seconds at startup or on the first run.
+- Analysis reads the decoded PCM once instead of twice by deriving the peak from a running min/max — the result is bit-identical.
+- qaac encoding scales its timeout with the input size instead of always aborting at 600 seconds.
+
+#### Fixed
+- Background probes that finish after the window closes no longer call into a destroyed Tcl interpreter; pending timers are cancelled on exit.
+- The mouse wheel now scrolls the log box when the pointer is over it, instead of always scrolling the page.
+- FLAC output snaps unsupported bit depths to the nearest supported one rather than silently ignoring the setting.
+
 ### [2.2.6] - 2026-07-21
 
 #### Added
@@ -163,6 +185,28 @@
 ## Turkce
 
 ### Unreleased
+
+### [2.3.0] - 2026-08-02
+
+#### Guvenlik
+- **Dis araclar artik calisma dizininden cozulmuyor.** Windows'ta `shutil.which()` PATH'ten once bulundugu dizine bakiyor; bu yuzden icinde sahte bir `ffmpeg.exe` veya `ffprobe.exe` bulunan bir klasorden baslatilan uygulama o dosyayi calistiriyordu. Arac aramasi artik yalnizca mutlak PATH girdilerini dikkate aliyor, goreli PATH girdileri de yok sayiliyor.
+- Deew calisma zamani denetimleri kurulum dizini yerine kullaniciya ozel bir dizine yaziyor; kurulum dizini sistem geneli kurulumlarda salt okunur, PyInstaller paketinde ise geciciydi.
+- Medya yollari FFmpeg'e ulasmadan once mutlak hale getiriliyor; boylece `sample:track.wav` gibi goreli bir yol FFmpeg protokol oneki olarak yorumlanamiyor.
+
+#### Eklenenler
+- Ilerleme cubugu artik mevcut asamayi ve tamamlanma yuzdesini gosteriyor.
+- Bolge basligini degistirmesi gereken cagiranlar icin `DropZone.show_status()` / `clear_selection()`.
+
+#### Degisenler
+- Arac konumlari ve FFmpeg/FFprobe erisilebilirlik denetimi onbellege aliniyor; her senkronizasyon calistirmasindan dort surec baslatma kalkiyor. Arac yollari degisince ikisi de gecersiz kiliniyor.
+- Deew durum rozeti ve Baslat dugmesinin arac denetimleri worker thread'lerde calisiyor; pencere artik acilista veya ilk calistirmada 15 saniyeye kadar donmuyor.
+- Analiz, tepe degerini calisan min/max uzerinden turetip decode edilmis PCM'i iki kez yerine bir kez okuyor — sonuc bit duzeyinde ayni.
+- qaac kodlamasi her zaman 600 saniyede iptal etmek yerine zaman asimini girdi boyutuna gore olcekliyor.
+
+#### Duzeltilenler
+- Pencere kapandiktan sonra biten arka plan denetimleri artik yok edilmis Tcl yorumlayicisina cagri yapmiyor; bekleyen zamanlayicilar cikista iptal ediliyor.
+- Fare tekerlegi, imlec log kutusunun uzerindeyken sayfayi degil log kutusunu kaydiriyor.
+- FLAC ciktisi desteklenmeyen bit derinliklerini sessizce yok saymak yerine en yakin desteklenen degere yuvarliyor.
 
 ### [2.2.6] - 2026-07-21
 

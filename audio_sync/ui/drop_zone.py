@@ -202,6 +202,19 @@ class DropZone(tk.Frame):
         basename = os.path.basename(path)
         self._name_lbl.config(text=short_name(basename), fg=self._color)
 
+    def show_status(self, message: str) -> None:
+        """Replace the filename line with a transient status message.
+
+        Used while a container is being probed or extracted so callers do not
+        have to reach into the internal label.
+        """
+        self._name_lbl.config(text=message, fg=THEME.muted)
+
+    def clear_selection(self) -> None:
+        """Drop any selection and restore the placeholder text."""
+        self.filepath.set("")
+        self._name_lbl.config(text=t("no_file_selected"), fg=THEME.muted)
+
     def update_label(self, label: str) -> None:
         """Update the label text (for language changes).
 

@@ -10,6 +10,7 @@ from typing import Tuple
 
 from audio_sync.config import QaacConfig, QaacMode, resolve_tool
 from audio_sync.core.process_runner import run_text_process
+from audio_sync.utils import scale_timeout_for_size
 
 logger = logging.getLogger(__name__)
 
@@ -107,14 +108,23 @@ class QaacEncoder:
 
         logger.info("qaac command: %s", " ".join(cmd))
 
+        # A feature-length WAV needs far more than the base budget, so scale the
+        # timeout with the actual input size instead of aborting a valid encode.
+        timeout = scale_timeout_for_size(
+            config.timeout_sec,
+            input_path,
+            per_gib_sec=config.timeout_per_gib_sec,
+            max_sec=config.max_timeout_sec,
+        )
+
         result = run_text_process(
             cmd,
-            timeout=config.timeout_sec,
+            timeout=timeout,
             cancel_event=cancel_event,
             not_found_message=(
                 f"'{binary}' could not be executed. Make sure qaac is installed correctly."
             ),
-            timeout_message=f"qaac encoding timed out (>{config.timeout_sec}s)",
+            timeout_message=f"qaac encoding timed out (>{timeout}s)",
         )
         if result.returncode != 0:
             raise RuntimeError(

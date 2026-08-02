@@ -171,6 +171,10 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "Deew ● kullanılamıyor",
         "en": "Deew ● unavailable",
     },
+    "deew_checking": {
+        "tr": "Deew ● denetleniyor…",
+        "en": "Deew ● checking…",
+    },
     "deew_desc": {
         "tr": "  → Deew ile AC3/EAC3 çıktı oluştur",
         "en": "  → Create AC3/EAC3 output with Deew",
@@ -224,6 +228,10 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "processing": {
         "tr": "İşleniyor…",
         "en": "Processing…",
+    },
+    "checking_tools": {
+        "tr": "Araçlar denetleniyor…",
+        "en": "Checking tools…",
     },
     "canceling": {
         "tr": "İptal ediliyor…",
