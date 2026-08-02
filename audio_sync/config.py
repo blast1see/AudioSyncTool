@@ -6,8 +6,9 @@ import dataclasses
 import enum
 import json
 import os
-import shutil
+import sys
 import tempfile
+import threading
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -15,9 +16,17 @@ from pathlib import Path
 # ── Tool Path Resolution ─────────────────────────────────────────────
 _TOOL_PATHS_DIR = Path.home() / ".audio_sync_tool"
 _TOOL_PATHS_FILE = _TOOL_PATHS_DIR / "tool_paths.json"
+_PROBE_CACHE_DIR = _TOOL_PATHS_DIR / "probe"
 
 # qaac binary candidates — 64-bit build is preferred
 _QAAC_CANDIDATES = ("qaac64", "qaac")
+
+# Fallback used when PATHEXT is missing; mirrors the Windows default order so
+# that a planted ``ffmpeg.bat`` can never win over a real ``ffmpeg.exe``.
+_DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD"
+
+_resolve_lock = threading.Lock()
+_resolve_cache: dict[str, str] = {}
 
 
 @dataclasses.dataclass
@@ -79,6 +88,7 @@ def save_tool_paths(paths: ToolPaths) -> bool:
         os.replace(temp_path, _TOOL_PATHS_FILE)
         global TOOL_PATHS
         TOOL_PATHS = paths
+        invalidate_tool_cache()
         return True
     except Exception:
         if temp_path is not None:
@@ -89,44 +99,111 @@ def save_tool_paths(paths: ToolPaths) -> bool:
         return False
 
 
+def probe_cache_dir() -> Path:
+    """Return a per-user scratch directory for external-tool runtime probes.
+
+    Probing must never write inside the installation tree: that directory is
+    read-only for system-wide installs and ephemeral inside a PyInstaller
+    bundle.
+    """
+    _PROBE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    return _PROBE_CACHE_DIR
+
+
+def _executable_candidates(name: str) -> tuple[str, ...]:
+    """Return the filenames to try for ``name`` on the current platform."""
+    if sys.platform != "win32":
+        return (name,)
+
+    if os.path.splitext(name)[1]:
+        return (name,)
+
+    extensions = [
+        ext
+        for ext in (os.environ.get("PATHEXT") or _DEFAULT_PATHEXT).split(os.pathsep)
+        if ext.startswith(".")
+    ]
+    return tuple(name + ext for ext in extensions) or (name + ".EXE",)
+
+
+def _is_executable_file(path: str) -> bool:
+    return os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def which_on_path(name: str) -> str | None:
+    """Locate ``name`` in PATH, deliberately ignoring the working directory.
+
+    ``shutil.which`` searches the current directory first on Windows, so
+    launching the app from a folder that happens to contain ``ffmpeg.exe``
+    would run that binary instead of the installed one. Only absolute PATH
+    entries are searched here, which also rules out relative PATH entries.
+    """
+    if os.path.dirname(name):
+        return name if _is_executable_file(name) else None
+
+    candidates = _executable_candidates(name)
+    for entry in (os.environ.get("PATH") or os.defpath).split(os.pathsep):
+        entry = entry.strip().strip('"')
+        if not entry or not os.path.isabs(entry):
+            continue
+        for candidate in candidates:
+            full_path = os.path.join(entry, candidate)
+            if _is_executable_file(full_path):
+                return full_path
+    return None
+
+
+def invalidate_tool_cache() -> None:
+    """Drop memoized tool locations after the configured paths change."""
+    with _resolve_lock:
+        _resolve_cache.clear()
+
+
 def resolve_tool(name: str) -> str:
     """Resolve an external tool to its executable path.
-    
+
     Resolution order:
-    1. User-configured custom path in TOOL_PATHS (if set and file exists)
-    2. System PATH lookup via shutil.which()
+    1. User-configured custom path in TOOL_PATHS (if set and the file exists)
+    2. PATH lookup via :func:`which_on_path`, which skips the working directory
     3. For qaac: tries qaac64 first, then qaac
-    
+
+    Results are memoized because a single synchronization run resolves the same
+    tools a dozen times, and each miss walks every PATH directory.
+
     Args:
         name: Tool name — one of "ffmpeg", "ffprobe", "qaac", "deew"
-        
+
     Returns:
-        Resolved executable path or name (for PATH-based lookup)
-        
+        Absolute path to the resolved executable.
+
     Raises:
         OSError: If the tool cannot be found
     """
-    # Check user-configured custom path
+    # Check user-configured custom path — this wins over PATH by design.
     custom = getattr(TOOL_PATHS, name, None)
     if custom and os.path.isfile(custom):
-        return custom
-    
+        return os.path.abspath(custom)
+
+    with _resolve_lock:
+        cached = _resolve_cache.get(name)
+    if cached is not None and _is_executable_file(cached):
+        return cached
+
     # Special handling for qaac — try qaac64 first
+    candidates = _QAAC_CANDIDATES if name == "qaac" else (name,)
+    for candidate in candidates:
+        found = which_on_path(candidate)
+        if found:
+            resolved = os.path.abspath(found)
+            with _resolve_lock:
+                _resolve_cache[name] = resolved
+            return resolved
+
     if name == "qaac":
-        for candidate in _QAAC_CANDIDATES:
-            found = shutil.which(candidate)
-            if found:
-                return found
         raise OSError(
             "qaac not found. Please install qaac and add it to PATH "
             "(expected at C:\\qaac). The binary may be named qaac64.exe."
         )
-    
-    # Standard PATH lookup
-    found = shutil.which(name)
-    if found:
-        return found
-    
     raise OSError(f"{name} not found in PATH. Please install {name} or set a custom path.")
 
 
@@ -592,6 +669,8 @@ class QaacConfig:
     he_aac: bool = False            # Use HE-AAC profile
     no_delay: bool = True           # --no-delay flag
     timeout_sec: int = 600
+    timeout_per_gib_sec: int = 900  # grow the budget with the input size
+    max_timeout_sec: int = 3600
 
 
 # ── Varsayılan Örnekler ─────────────────────────────────────────────────────

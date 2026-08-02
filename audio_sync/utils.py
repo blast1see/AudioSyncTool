@@ -59,6 +59,32 @@ def parse_int(
     return parsed
 
 
+def scale_timeout_for_size(
+    base_sec: int,
+    *input_paths: str,
+    per_gib_sec: int,
+    max_sec: int,
+    extra_sec: int = 0,
+) -> int:
+    """Grow a subprocess timeout with the total size of its inputs.
+
+    A fixed timeout either aborts legitimate work on feature-length audio or
+    lets a hung process linger on short clips; scaling by input size avoids
+    both. Unreadable paths simply contribute nothing.
+    """
+    total_gib = 0.0
+    for path in input_paths:
+        if not path:
+            continue
+        try:
+            total_gib += os.path.getsize(path) / (1024**3)
+        except OSError:
+            continue
+
+    scaled = base_sec + extra_sec + int(total_gib * per_gib_sec)
+    return max(base_sec, min(max_sec, scaled))
+
+
 def validate_file(path: str, label: str) -> None:
     """Validate that a file exists, is readable, and is non-empty."""
     if not os.path.isfile(path):

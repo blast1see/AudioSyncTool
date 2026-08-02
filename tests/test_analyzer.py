@@ -85,6 +85,76 @@ def test_skip_fallback_and_disk_pcm_match_memory(tmp_path: Path) -> None:
     assert disk.delay_ms == pytest.approx(memory.delay_ms, abs=15)
 
 
+def _two_pass_normalization(
+    analyzer: AudioAnalyzer, pcm_path: str
+) -> tuple[float, float]:
+    """The previous implementation, kept as the reference for the fast path."""
+    from audio_sync.core.analyzer import _INT16_SCALE, ANALYSIS_DTYPE
+
+    chunk_size = analyzer._chunk_size_samples()
+    total_sum = 0.0
+    total_count = 0
+    for chunk in analyzer._iter_pcm_file_chunks(pcm_path, chunk_size):
+        scaled = chunk.astype(ANALYSIS_DTYPE)
+        scaled *= _INT16_SCALE
+        total_sum += float(np.sum(scaled, dtype=np.float64))
+        total_count += scaled.size
+
+    mean = total_sum / total_count
+    peak = 0.0
+    for chunk in analyzer._iter_pcm_file_chunks(pcm_path, chunk_size):
+        scaled = chunk.astype(ANALYSIS_DTYPE)
+        scaled *= _INT16_SCALE
+        scaled -= ANALYSIS_DTYPE(mean)
+        peak = max(peak, float(np.max(np.abs(scaled))))
+
+    return mean, peak if peak > 1e-9 else 1.0
+
+
+@pytest.mark.parametrize(
+    "make_signal",
+    [
+        lambda: rich_signal(),
+        # A strong DC offset makes the mean subtraction actually matter.
+        lambda: np.clip(
+            rich_signal().astype(np.int32) + 6_000, -32_768, 32_767
+        ).astype(np.int16),
+        lambda: np.zeros(RATE * 5, dtype=np.int16),
+    ],
+    ids=["normal", "dc_offset", "silence"],
+)
+def test_single_pass_normalization_matches_two_pass(tmp_path: Path, make_signal) -> None:
+    pcm_path = tmp_path / "signal.s16le"
+    make_signal().tofile(pcm_path)
+    analyzer = AudioAnalyzer(CONFIG)
+
+    assert analyzer._measure_pcm_normalization(str(pcm_path)) == _two_pass_normalization(
+        analyzer, str(pcm_path)
+    )
+
+
+def test_single_pass_normalization_reads_the_file_once(
+    tmp_path: Path, monkeypatch
+) -> None:
+    pcm_path = tmp_path / "signal.s16le"
+    # Force several chunks so a second pass would be unmistakable.
+    rich_signal(seconds=20).tofile(pcm_path)
+    analyzer = AudioAnalyzer(replace(CONFIG, analysis_chunk_sec=1))
+    monkeypatch.setattr(analyzer, "_chunk_size_samples", lambda: RATE)
+
+    opens: list[str] = []
+    real_open = open
+
+    def counting_open(path, *args, **kwargs):
+        opens.append(str(path))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", counting_open)
+    analyzer._measure_pcm_normalization(str(pcm_path))
+
+    assert opens.count(str(pcm_path)) == 1
+
+
 def test_weak_outlier_segment_does_not_move_dominant_lag_and_drift_is_reported() -> None:
     analyzer = AudioAnalyzer(CONFIG)
     rows = [
