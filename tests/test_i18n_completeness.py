@@ -55,6 +55,33 @@ def test_every_key_used_in_code_exists() -> None:
     assert not undefined, f"kodda kullanılıp tabloda olmayan: {undefined}"
 
 
+def test_no_key_is_left_unreferenced() -> None:
+    """An entry nothing reaches is either dead weight or lost wiring.
+
+    Both existed here: 31 entries survived features that had changed shape,
+    while others — deew's start and completion messages among them — were dead
+    because the code had quietly replaced them with hard-coded English. The
+    second kind is a bug you cannot see until someone switches language, and it
+    looks exactly like the first until you check.
+
+    Add the key and the call that uses it in the same change, and this stays
+    quiet.
+    """
+    blob = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in source_files()
+        if path.name != "i18n.py"  # defining a key is not a use of it
+    )
+    # Keys reached through a variable still appear as a literal at the call
+    # site that supplies them, so a plain text search covers those too.
+    unreferenced = sorted(
+        key for key in TRANSLATIONS
+        if key not in literal_keys()
+        and not re.search(rf'["\']{re.escape(key)}["\']', blob)
+    )
+    assert not unreferenced, f"hiçbir yerden erişilmeyen anahtar: {unreferenced}"
+
+
 def test_placeholders_match_across_languages() -> None:
     """A field present in one language and not the other raises at format time."""
     def fields(text: str) -> set[str]:
