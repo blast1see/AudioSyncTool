@@ -138,6 +138,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         # into an interpreter that is going away.
         self._closing: bool = False
         self._pending_after_ids: set[str] = set()
+        # Rebuilt when the language changes; see _labelled_menu.
+        self._labelled_menus: list[Callable[[], None]] = []
 
         # Kullanıcı ayarları
         self.skip_intro_var = tk.StringVar(value="120")
@@ -473,6 +475,71 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         box.pack(fill="x", padx=14, pady=pady)
         return box
 
+    def _labelled_menu(
+        self,
+        parent: tk.Frame,
+        value_var: tk.StringVar,
+        choices: Callable[[], list[tuple[str, str]]],
+        *,
+        width: int,
+        on_change: Callable[[str], None] | None = None,
+    ) -> tk.OptionMenu:
+        """A dropdown that shows a readable label while the variable keeps the value.
+
+        Tk ties an ``OptionMenu``'s button text to its variable, so a menu whose
+        variable holds ``music_light`` or ``--tvbr`` displays exactly that. The
+        enums already carry proper names — the pipeline selector even built a
+        list of them and then threw it away — so a second variable holds what is
+        shown and the original keeps the value every caller already reads.
+
+        ``choices`` is a callable because some labels are translated and have to
+        be rebuilt when the language changes.
+        """
+        display = tk.StringVar()
+        menu_button = tk.OptionMenu(parent, display, "")
+        menu_button.config(
+            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+            activebackground=THEME.card, activeforeground=THEME.text,
+            highlightthickness=0, relief="flat", width=width,
+        )
+        menu_button["menu"].config(
+            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+            activebackground=THEME.accent, activeforeground=THEME.bg,
+        )
+
+        labels: dict[str, str] = {}
+
+        def show_current(*_args: object) -> None:
+            """Keep the caption on whatever the value currently is.
+
+            Driven by a trace rather than by the click handler, so a value set
+            from code — restoring saved settings, a test — shows through too.
+            """
+            current = value_var.get()
+            if current in labels:
+                display.set(labels[current])
+            elif labels:  # the option went away; fall back to the first one
+                value_var.set(next(iter(labels)))
+
+        def rebuild() -> None:
+            menu = menu_button["menu"]
+            menu.delete(0, "end")
+            labels.clear()
+            labels.update(choices())
+            for value, label in labels.items():
+                menu.add_command(label=label, command=lambda v=value: _select(v))
+            show_current()
+
+        def _select(value: str) -> None:
+            value_var.set(value)
+            if on_change is not None:
+                on_change(value)
+
+        rebuild()
+        value_var.trace_add("write", show_current)
+        self._labelled_menus.append(rebuild)
+        return menu_button
+
     def _option_note(
         self,
         parent: tk.Frame,
@@ -679,19 +746,11 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         )
         self._fmt_label.pack(side="left")
 
-        self._fmt_menu = tk.OptionMenu(
+        self._fmt_menu = self._labelled_menu(
             fmt_row,
             self.deew_format_var,
-            *[f.cli_value for f in DeewFormat],
-        )
-        self._fmt_menu.config(
-            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
-            activebackground=THEME.card, activeforeground=THEME.text,
-            highlightthickness=0, relief="flat", width=12,
-        )
-        self._fmt_menu["menu"].config(
-            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
-            activebackground=THEME.accent, activeforeground=THEME.bg,
+            lambda: [(f.cli_value, f.display_name) for f in DeewFormat],
+            width=12,
         )
         self._fmt_menu.pack(side="right")
 
@@ -764,19 +823,11 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         )
         self._drc_label.pack(side="left")
 
-        self._drc_menu = tk.OptionMenu(
+        self._drc_menu = self._labelled_menu(
             drc_row,
             self.deew_drc_var,
-            *[d.cli_value for d in DeewDRC],
-        )
-        self._drc_menu.config(
-            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
-            activebackground=THEME.card, activeforeground=THEME.text,
-            highlightthickness=0, relief="flat", width=16,
-        )
-        self._drc_menu["menu"].config(
-            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
-            activebackground=THEME.accent, activeforeground=THEME.bg,
+            lambda: [(d.cli_value, d.display_name) for d in DeewDRC],
+            width=16,
         )
         self._drc_menu.pack(side="right")
 
@@ -856,26 +907,17 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         )
         self._encoding_pipeline_lbl.pack(side="left", padx=(0, 8))
 
-        pipeline_options = [
-            (EncodingPipeline.NONE.value, t("encoding_none")),
-            (EncodingPipeline.DEEW.value, t("encoding_deew")),
-            (EncodingPipeline.FFMPEG.value, t("encoding_ffmpeg")),
-            (EncodingPipeline.QAAC.value, t("encoding_qaac")),
-        ]
-
-        self._encoding_pipeline_menu = tk.OptionMenu(
-            sel_row, self._encoding_pipeline_var,
-            *[v for v, _ in pipeline_options],
-            command=self._on_encoding_pipeline_change,
-        )
-        self._encoding_pipeline_menu.config(
-            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
-            highlightthickness=0, relief="flat", activebackground=THEME.accent,
-            activeforeground=THEME.bg,
-        )
-        self._encoding_pipeline_menu["menu"].config(
-            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
-            activebackground=THEME.accent, activeforeground=THEME.bg,
+        self._encoding_pipeline_menu = self._labelled_menu(
+            sel_row,
+            self._encoding_pipeline_var,
+            lambda: [
+                (EncodingPipeline.NONE.value, t("encoding_none")),
+                (EncodingPipeline.DEEW.value, t("encoding_deew")),
+                (EncodingPipeline.FFMPEG.value, t("encoding_ffmpeg")),
+                (EncodingPipeline.QAAC.value, t("encoding_qaac")),
+            ],
+            width=24,
+            on_change=self._on_encoding_pipeline_change,
         )
         self._encoding_pipeline_menu.pack(side="left", fill="x", expand=True)
 
@@ -892,25 +934,18 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         )
         self._ffmpeg_format_lbl.pack(side="left", padx=(0, 8))
 
-        ffmpeg_formats = [
-            (FFmpegOutputFormat.AAC.codec, t("ffmpeg_aac_label")),
-            (FFmpegOutputFormat.FLAC.codec, t("ffmpeg_flac_label")),
-            (FFmpegOutputFormat.OPUS.codec, t("ffmpeg_opus_label")),
-            (FFmpegOutputFormat.AC3.codec, t("ffmpeg_ac3_label")),
-            (FFmpegOutputFormat.EAC3.codec, t("ffmpeg_eac3_label")),
-        ]
-
-        self._ffmpeg_format_menu = tk.OptionMenu(
-            ff_row1, self._ffmpeg_format_var,
-            *[v for v, _ in ffmpeg_formats],
-            command=self._on_ffmpeg_format_change,
-        )
-        self._ffmpeg_format_menu.config(
-            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
-            highlightthickness=0, relief="flat",
-        )
-        self._ffmpeg_format_menu["menu"].config(
-            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+        self._ffmpeg_format_menu = self._labelled_menu(
+            ff_row1,
+            self._ffmpeg_format_var,
+            lambda: [
+                (FFmpegOutputFormat.AAC.codec, t("ffmpeg_aac_label")),
+                (FFmpegOutputFormat.FLAC.codec, t("ffmpeg_flac_label")),
+                (FFmpegOutputFormat.OPUS.codec, t("ffmpeg_opus_label")),
+                (FFmpegOutputFormat.AC3.codec, t("ffmpeg_ac3_label")),
+                (FFmpegOutputFormat.EAC3.codec, t("ffmpeg_eac3_label")),
+            ],
+            width=24,
+            on_change=self._on_ffmpeg_format_change,
         )
         self._ffmpeg_format_menu.pack(side="left", fill="x", expand=True)
 
@@ -1031,24 +1066,17 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         )
         self._qaac_mode_lbl.pack(side="left", padx=(0, 8))
 
-        qaac_modes = [
-            (QaacMode.TVBR.flag, t("qaac_tvbr_label")),
-            (QaacMode.CVBR.flag, t("qaac_cvbr_label")),
-            (QaacMode.ABR.flag, t("qaac_abr_label")),
-            (QaacMode.CBR.flag, t("qaac_cbr_label")),
-        ]
-
-        self._qaac_mode_menu = tk.OptionMenu(
-            qa_row1, self._qaac_mode_var,
-            *[v for v, _ in qaac_modes],
-            command=self._on_qaac_mode_change,
-        )
-        self._qaac_mode_menu.config(
-            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
-            highlightthickness=0, relief="flat",
-        )
-        self._qaac_mode_menu["menu"].config(
-            bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
+        self._qaac_mode_menu = self._labelled_menu(
+            qa_row1,
+            self._qaac_mode_var,
+            lambda: [
+                (QaacMode.TVBR.flag, t("qaac_tvbr_label")),
+                (QaacMode.CVBR.flag, t("qaac_cvbr_label")),
+                (QaacMode.ABR.flag, t("qaac_abr_label")),
+                (QaacMode.CBR.flag, t("qaac_cbr_label")),
+            ],
+            width=24,
+            on_change=self._on_qaac_mode_change,
         )
         self._qaac_mode_menu.pack(side="left", fill="x", expand=True)
 
@@ -1635,6 +1663,10 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._qaac_no_delay_cb.config(text=t("encoding_no_delay"))
         self._ffmpeg_flac_bd_lbl.config(text=t("flac_bit_depth_label"))
         self._on_ffmpeg_format_change(self._ffmpeg_format_var.get())
+
+        # Açılır menüler etiketi gösterip değeri saklar; etiketler çevrilidir.
+        for rebuild in self._labelled_menus:
+            rebuild()
 
         # Tool paths button
         self._tool_paths_btn.config(text=t("tool_paths_button"))

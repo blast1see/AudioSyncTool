@@ -80,6 +80,63 @@ def test_new_labels_are_translated(app) -> None:
     assert not turkish & english, f"untranslated: {turkish & english}"
 
 
+def test_dropdowns_show_labels_and_keep_values(app) -> None:
+    """Tk ties a menu button's caption to its variable, so both must be checked.
+
+    Five menus displayed the internal value: the DRC profile read ``music_light``
+    and the qaac mode read ``--tvbr``. The caption has to be the readable name
+    while the variable keeps the value the encoders are built from — and a value
+    set from code has to show through as well.
+    """
+    menus = [
+        (app._fmt_menu, app.deew_format_var),
+        (app._drc_menu, app.deew_drc_var),
+        (app._encoding_pipeline_menu, app._encoding_pipeline_var),
+        (app._ffmpeg_format_menu, app._ffmpeg_format_var),
+        (app._qaac_mode_menu, app._qaac_mode_var),
+    ]
+
+    for button, variable in menus:
+        menu = button.nametowidget(button.cget("menu"))
+        labels = [menu.entrycget(i, "label") for i in range(menu.index("end") + 1)]
+        original = variable.get()
+
+        assert button.cget("text") in labels
+        assert button.cget("text") != variable.get(), f"raw value shown: {labels}"
+
+        for index, label in enumerate(labels):
+            menu.invoke(index)
+            assert button.cget("text") == label
+
+        # A value assigned from code — restoring settings — must relabel too.
+        menu.invoke(0)
+        first_value = variable.get()
+        menu.invoke(len(labels) - 1)
+        variable.set(first_value)
+        assert button.cget("text") == labels[0]
+
+        variable.set(original)
+
+    app._on_encoding_pipeline_change(app._encoding_pipeline_var.get())
+    app._on_ffmpeg_format_change(app._ffmpeg_format_var.get())
+    app._on_qaac_mode_change(app._qaac_mode_var.get())
+
+
+def test_dropdown_labels_follow_the_language(app) -> None:
+    """The pipeline names are translated; relabelling must keep the selection."""
+    app._on_language_change(Language.EN.display_name)
+    app._encoding_pipeline_var.set("none")
+    english = app._encoding_pipeline_menu.cget("text")
+
+    app._on_language_change(Language.TR.display_name)
+    turkish = app._encoding_pipeline_menu.cget("text")
+    assert app._encoding_pipeline_var.get() == "none"
+    assert english != turkish, "pipeline adı çevrilmiyor"
+
+    app._on_language_change(Language.EN.display_name)
+    assert app._encoding_pipeline_menu.cget("text") == english
+
+
 def test_layout_fits_a_1080p_screen(app) -> None:
     """The whole window must be usable without scrolling on a 1920x1080 panel.
 
