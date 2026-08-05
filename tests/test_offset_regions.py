@@ -206,21 +206,41 @@ def test_drift_correction_stands_down_when_the_offset_steps() -> None:
 # ── the filter graph ─────────────────────────────────────────────────────────
 
 
-def chain_for(monkeypatch, regions, **kwargs) -> str:
+def command_for(monkeypatch, regions, **kwargs) -> list[str]:
     monkeypatch.setattr("audio_sync.core.ffmpeg_wrapper.resolve_tool", lambda name: name)
     cmd, _summary = FFmpegWrapper().build_sync_command(
         "sync.wav", 0.0, INFO, KEEP_RATE, "out.wav", offset_regions=regions, **kwargs
     )
+    return cmd
+
+
+def chain_for(monkeypatch, regions, **kwargs) -> str:
+    cmd = command_for(monkeypatch, regions, **kwargs)
     return cmd[cmd.index("-filter_complex") + 1]
 
 
-def test_piecewise_graph_splits_trims_and_concatenates(monkeypatch) -> None:
+def test_piecewise_graph_trims_each_region_and_concatenates(monkeypatch) -> None:
     chain = chain_for(monkeypatch, REGIONS)
-    assert "asplit=2" in chain
     # The splice ends at [spliced] so shared tail stages can still be appended.
     assert "concat=n=2:v=0:a=1[spliced]" in chain
     assert chain.rstrip().endswith("[out]")
     assert chain.count("atrim=start=") == 2
+
+
+def test_each_region_reads_its_own_input(monkeypatch) -> None:
+    """Sharing one decoder via ``asplit`` deadlocks on some FFmpeg builds.
+
+    ``concat`` drains the first piece while the later branches are handed frames
+    they cannot use yet. It ran in under a second locally and hung for over half
+    an hour on the FFmpeg shipped with Ubuntu, so each region gets its own input.
+    """
+    cmd = command_for(monkeypatch, REGIONS)
+    chain = cmd[cmd.index("-filter_complex") + 1]
+
+    assert "asplit" not in chain
+    assert cmd.count("-i") == len(REGIONS)
+    for index in range(len(REGIONS)):
+        assert f"[{index}:a]" in chain
 
 
 def test_mode_tail_still_applies_to_a_spliced_track(monkeypatch) -> None:

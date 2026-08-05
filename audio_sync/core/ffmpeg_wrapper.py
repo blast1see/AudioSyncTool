@@ -621,6 +621,15 @@ class FFmpegWrapper:
         splice is a genuine discontinuity — that is the point — and without the
         fade the waveform steps instantly, which is audible as a click.
 
+        Each region reads from its *own* input rather than from an ``asplit`` of
+        one.  Splitting a single decoder couples the branches: ``concat`` drains
+        the first piece while the later branches are handed frames they cannot
+        use yet, and whether that resolves depends on the FFmpeg build.  It ran
+        in well under a second locally and hung for over half an hour on the
+        FFmpeg that ships with Ubuntu.  Separate inputs decode independently, so
+        there is nothing to deadlock on; the cost is re-reading the file once per
+        region, bounded by ``step_max_regions``.
+
         Returns:
             ``(filter_chain, summary)`` — the chain ends at ``[spliced]`` so the
             caller can still append the shared tail stages.
@@ -630,9 +639,7 @@ class FFmpegWrapper:
 
         fade = self._config.step_splice_fade_sec
         labels: list[str] = []
-        parts: list[str] = [f"[0:a]asplit={len(regions)}" + "".join(
-            f"[s{i}]" for i in range(len(regions))
-        )]
+        parts: list[str] = []
 
         for index, region in enumerate(regions):
             lag_sec = region.lag_ms / 1000.0
@@ -662,7 +669,7 @@ class FFmpegWrapper:
                     f"afade=t=out:st={duration - fade:.6f}:d={fade:.4f}"
                 )
 
-            parts.append(f"[s{index}]" + ",".join(stages) + f"[p{index}]")
+            parts.append(f"[{index}:a]" + ",".join(stages) + f"[p{index}]")
             labels.append(f"[p{index}]")
 
         parts.append("".join(labels) + f"concat=n={len(regions)}:v=0:a=1[spliced]")
@@ -722,11 +729,16 @@ class FFmpegWrapper:
         notes: list[str] = []
         head = ""
         entry = "[0:a]"
+        input_count = 1
 
         if offset_regions and len(offset_regions) > 1:
             head, piecewise_note = self.build_piecewise_filter(offset_regions, channels)
             notes.append(piecewise_note)
             entry = "[spliced]"
+            # One input per region: the graph reads each piece from its own
+            # decoder rather than splitting one, which is what keeps it from
+            # deadlocking on some FFmpeg builds.
+            input_count = len(offset_regions)
             stages = []
         else:
             stages = []
@@ -766,10 +778,13 @@ class FFmpegWrapper:
             "-v", "error",
             "-nostdin",
             "-y",
-            "-i", sync_path,
+        ]
+        for _ in range(input_count):
+            cmd.extend(["-i", sync_path])
+        cmd.extend([
             "-filter_complex", flt,
             "-map", "[out]",
-        ]
+        ])
 
         if output_sr.needs_resample:
             cmd.extend(["-ar", str(output_sr.rate)])
