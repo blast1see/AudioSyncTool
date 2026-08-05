@@ -34,6 +34,8 @@ class FakeFFmpeg:
         self.fail_sync = fail_sync
         self.fail_final_probe = fail_final_probe
         self.applied_output_rate = None
+        self.sync_kwargs: dict = {}
+        self.sync_delay: float | None = None
 
     def probe_audio(self, path: str):
         if self.fail_final_probe and ".staged-" in Path(path).name:
@@ -45,8 +47,10 @@ class FakeFFmpeg:
         pcm.write_bytes(b"\0\0" * 64)
         return 8_000, str(pcm), 64
 
-    def apply_sync(self, _source, _sync, _delay, _info, output_sr, output, **_kwargs):
+    def apply_sync(self, _source, _sync, delay, _info, output_sr, output, **kwargs):
         self.applied_output_rate = output_sr
+        self.sync_delay = delay
+        self.sync_kwargs = kwargs
         if self.fail_sync:
             raise RuntimeError("injected sync failure")
         Path(output).write_bytes(b"RIFF-synchronized")
@@ -79,6 +83,74 @@ def no_real_tool_probe(monkeypatch):
     monkeypatch.setattr(
         "audio_sync.core.pipeline.FFmpegWrapper.check_availability", lambda: None
     )
+
+
+def test_pipeline_hands_regions_to_ffmpeg_and_drops_the_drift(tmp_path: Path) -> None:
+    """A stepped file must be spliced, not stretched, and not both."""
+    import math
+
+    from audio_sync.core.models import OffsetRegion
+
+    regions = (
+        OffsetRegion(0.0, 3000.0, -9484.0, 20, 5.0),
+        OffsetRegion(3000.0, math.inf, -9616.0, 9, 4.6),
+    )
+    stepped = AnalysisResult(
+        delay_ms=-9500.0, coarse_ms=-9500.0, confidence=5.0,
+        total_segments=40, used_segments=29, drift_ms_per_min=8.0,
+        skip_fallback=False, drift_intercept_ms=-9500.0, drift_r2=0.95,
+        drift_span_sec=6000.0, offset_regions=regions,
+    )
+
+    class SteppedAnalyzer:
+        def calculate_delay_from_pcm_files(self, *_args, **_kwargs):
+            return stepped
+
+    fake = FakeFFmpeg()
+    source = make_input(tmp_path / "source.wav")
+    sync = make_input(tmp_path / "sync.wav")
+    outcome = SyncPipeline(ffmpeg=fake, analyzer=SteppedAnalyzer()).run(
+        SyncRequest(source, sync, str(tmp_path / "out.wav"), skip_intro_sec=0)
+    )
+
+    assert fake.sync_kwargs["offset_regions"] == regions
+    assert fake.sync_kwargs["drift_ms_per_min"] is None, (
+        "a tempo correction fitted through a step is meaningless"
+    )
+    assert outcome.offset_regions_applied == regions
+
+
+def test_pipeline_can_be_told_to_ignore_regions(tmp_path: Path) -> None:
+    import math
+
+    from audio_sync.core.models import OffsetRegion
+
+    regions = (
+        OffsetRegion(0.0, 3000.0, -9484.0, 20, 5.0),
+        OffsetRegion(3000.0, math.inf, -9616.0, 9, 4.6),
+    )
+    stepped = AnalysisResult(
+        delay_ms=-9500.0, coarse_ms=-9500.0, confidence=5.0,
+        total_segments=40, used_segments=29, drift_ms_per_min=None,
+        skip_fallback=False, offset_regions=regions,
+    )
+
+    class SteppedAnalyzer:
+        def calculate_delay_from_pcm_files(self, *_args, **_kwargs):
+            return stepped
+
+    fake = FakeFFmpeg()
+    source = make_input(tmp_path / "source.wav")
+    sync = make_input(tmp_path / "sync.wav")
+    SyncPipeline(ffmpeg=fake, analyzer=SteppedAnalyzer()).run(
+        SyncRequest(
+            source, sync, str(tmp_path / "out.wav"),
+            skip_intro_sec=0, correct_steps=False,
+        )
+    )
+
+    assert fake.sync_kwargs["offset_regions"] == ()
+    assert fake.sync_delay == -9500.0
 
 
 def test_pipeline_atomically_replaces_output_only_after_success(tmp_path: Path) -> None:

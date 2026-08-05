@@ -201,6 +201,84 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "TESPİT EDİLEN KAYMA",
         "en": "DETECTED DELAY",
     },
+    "percent": {
+        "tr": "%{pct}",
+        "en": "{pct}%",
+    },
+    "readout_idle": {
+        "tr": "İki dosya seçip analiz başlatın.",
+        "en": "Pick both files, then run an analysis.",
+    },
+    "readout_detail": {
+        "tr": "{relation} · {quality} eşleşme · {used}/{total} pencere",
+        "en": "{relation} · {quality} match · {used}/{total} windows",
+    },
+    "readout_drift": {
+        "tr": "  ·  drift {drift:+.1f} ms/dk",
+        "en": "  ·  drift {drift:+.1f} ms/min",
+    },
+    "confidence_strong": {
+        "tr": "güçlü",
+        "en": "strong",
+    },
+    "confidence_fair": {
+        "tr": "orta",
+        "en": "fair",
+    },
+    "confidence_weak": {
+        "tr": "zayıf",
+        "en": "weak",
+    },
+    "correct_steps": {
+        "tr": "Kurgu farkından doğan ofset sıçramalarını düzelt",
+        "en": "Correct offset jumps from different edits",
+    },
+    "timing_corrections_note": {
+        "tr": "Her ikisi de yalnızca ölçüm güvenilir olduğunda uygulanır; "
+              "aksi hâlde tek sabit gecikme kullanılır ve loga yazılır.",
+        "en": "Both apply only when the measurement is reliable; otherwise a "
+              "single constant delay is used and the log says so.",
+    },
+    "fps_auto": {
+        "tr": "Kare hızı uyuşmazlığını kendiliğinden bul ve düzelt",
+        "en": "Detect and correct a frame-rate mismatch automatically",
+    },
+    "drift_looks_like_fps": {
+        "tr": "💡  Bu kayma bir {name} kare hızı uyuşmazlığına birebir uyuyor — "
+              "FPS dönüşümünü açmak genelde daha temiz sonuç verir.",
+        "en": "💡  This drift matches a {name} frame-rate mismatch — turning on "
+              "that FPS conversion usually gives a cleaner result.",
+    },
+    "readout_scattered": {
+        "tr": "  ·  pencereler ±{spread:.0f} ms ayrışıyor — tek gecikme tüm dosyayı tutmaz",
+        "en": "  ·  windows disagree by ±{spread:.0f} ms — one delay will not hold",
+    },
+    "steps_found": {
+        "tr": "✂  Ofset sıçraması: {count} bölge, toplam {span:.0f} ms fark",
+        "en": "✂  Offset jumps: {count} regions, {span:.0f} ms apart in total",
+    },
+    "steps_region": {
+        "tr": "     {start:.1f}–{end} dk  →  {lag:+.1f} ms  ({windows} pencere)",
+        "en": "     {start:.1f}–{end} min  →  {lag:+.1f} ms  ({windows} windows)",
+    },
+    "steps_region_end": {
+        "tr": "son",
+        "en": "end",
+    },
+    "readout_steps": {
+        "tr": "  ·  {count} bölge, {span:.0f} ms sıçrama",
+        "en": "  ·  {count} regions, {span:.0f} ms jump",
+    },
+    "correct_drift": {
+        "tr": "Zaman kaymasını (drift) otomatik düzelt",
+        "en": "Correct progressive drift automatically",
+    },
+    "correct_drift_note": {
+        "tr": "Ölçülen kayma güvenilirse hedef ses yeniden zamanlanır; "
+              "aksi halde yalnızca sabit gecikme uygulanır.",
+        "en": "Retimes the target track when the measured drift is reliable; "
+              "otherwise only the constant offset is applied.",
+    },
     "channel": {
         "tr": "KANAL",
         "en": "CHANNEL",

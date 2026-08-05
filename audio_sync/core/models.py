@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -73,6 +74,52 @@ class OutputSampleRate:
         return cls(rate=None, label=f"keep source ({sync_sr} Hz)")
 
 
+# ── Ofset Bölgesi ────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class OffsetRegion:
+    """Referans zaman çizgisinde tek bir sabit ofsetin geçerli olduğu aralık.
+
+    Yayın dublajları çoğu zaman tek bir gecikmeyle hizalanmaz: reklam arası
+    kesmeleri, makara değişimleri veya farklı kurgular filmin ortasında ani bir
+    basamak yaratır.  Ne sabit ofset ne de doğrusal drift bunu karşılar; bu
+    yüzden ofset zaman içinde parça parça tanımlanır.
+
+    Attributes:
+        start_sec: Bölgenin referans zaman çizgisindeki başlangıcı (sn).
+        end_sec: Bölgenin bitişi (sn).  Son bölge için ``math.inf``.
+        lag_ms: Bu bölgede geçerli olan gecikme (ms), ``delay_ms`` ile aynı
+            işaret kuralını kullanır.
+        window_count: Bölgeyi destekleyen doğrulanmış pencere sayısı.
+        confidence: Bölgeyi destekleyen pencerelerin medyan skoru.
+    """
+
+    start_sec: float
+    end_sec: float
+    lag_ms: float
+    window_count: int
+    confidence: float
+    evidence_start_sec: float = 0.0
+    evidence_end_sec: float = 0.0
+
+    @property
+    def duration_sec(self) -> float:
+        """Bölge süresi; son bölge için ``math.inf``."""
+        return self.end_sec - self.start_sec
+
+    def bounds_in_minutes(self, open_ended: str = "end") -> tuple[float, str]:
+        """Bölge sınırlarını dakikaya çevirir.
+
+        Son bölgenin bitişi ``math.inf`` olduğu için her gösterim yerinde ayrı
+        ayrı özel duruma sokuluyordu — pipeline logunda, arayüz logunda ve
+        FFmpeg özetinde, üçü de farklı hassasiyetle.  Dönüşüm burada bir kez
+        yapılır, biçimlendirme çağırana kalır.
+        """
+        end = open_ended if math.isinf(self.end_sec) else f"{self.end_sec / 60:.1f}"
+        return self.start_sec / 60.0, end
+
+
 # ── Analiz Sonucu ────────────────────────────────────────────────────────────
 
 
@@ -88,6 +135,14 @@ class AnalysisResult:
         used_segments: Kullanılan (doğrulanan) segment sayısı.
         drift_ms_per_min: Tahmini drift (ms/dk).  ``None`` ise hesaplanamadı.
         skip_fallback: Atlama süresi çok uzun olduğu için tam dosya kullanıldı mı?
+        drift_intercept_ms: Drift doğrusunun ``t=0`` anındaki gecikmesi (ms).
+            Drift düzeltmesi uygulanırken sabit ofset bu değerden türetilir;
+            ``delay_ms`` segmentlerin ağırlıklı medyanı olduğu için içeriğin
+            ortasındaki gecikmeyi temsil eder ve tempo düzeltmesiyle birlikte
+            kullanılamaz.
+        drift_r2: Drift doğrusal uyumunun açıkladığı varyans oranı (0–1).
+            Düşük değer, ölçülen eğimin gürültü olduğunu gösterir.
+        drift_span_sec: Drift uyumunu besleyen segmentlerin zaman aralığı (sn).
     """
 
     delay_ms: float
@@ -97,6 +152,56 @@ class AnalysisResult:
     used_segments: int
     drift_ms_per_min: float | None
     skip_fallback: bool
+    drift_intercept_ms: float | None = None
+    drift_r2: float | None = None
+    drift_span_sec: float = 0.0
+    offset_regions: tuple[OffsetRegion, ...] = ()
+    residual_mad_ms: float = 0.0
+    # Name of the frame-rate conversion that explains the pair better than no
+    # conversion, when one does.  Stored as the enum member name so this module
+    # does not have to import the config layer.
+    suspected_fps_conversion: str | None = None
+
+    @property
+    def windows_disagree_ms(self) -> float:
+        """Spread of the validated windows about the model that was fitted.
+
+        This is the honest measure of how far the single reported delay can be
+        trusted across the file.  A clean pair settles around 15 ms; a pair
+        whose sources are structurally different — a different cut, or a clock
+        difference too large for the search window to follow — leaves hundreds
+        of milliseconds of disagreement, and the headline delay is then only
+        right for whichever stretch of the film dominated the vote.
+        """
+        return self.residual_mad_ms
+
+    @property
+    def has_step_discontinuity(self) -> bool:
+        """Ofsetin dosya boyunca en az bir kez sıçrayıp sıçramadığı."""
+        return len(self.offset_regions) > 1
+
+    @property
+    def step_span_ms(self) -> float:
+        """En büyük ve en küçük bölge ofseti arasındaki fark (ms)."""
+        if not self.offset_regions:
+            return 0.0
+        lags = [region.lag_ms for region in self.offset_regions]
+        return max(lags) - min(lags)
+
+    @property
+    def has_drift_measurement(self) -> bool:
+        """Whether a usable slope and intercept came out of the fit.
+
+        This reports only what was measured.  Whether the measurement is worth
+        acting on is a policy question with configurable thresholds, and it is
+        answered by :meth:`SyncPipeline.resolve_drift_correction` — a result
+        object should not be deciding what the pipeline does with it.
+        """
+        return (
+            self.drift_ms_per_min is not None
+            and self.drift_intercept_ms is not None
+            and self.drift_r2 is not None
+        )
 
 
 class OperationCancelledError(RuntimeError):

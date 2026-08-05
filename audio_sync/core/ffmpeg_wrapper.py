@@ -8,12 +8,13 @@ Bu modül dış süreç çağrılarını soyutlayarak:
 
 from __future__ import annotations
 
+import math
 import os
 import subprocess
 import sys
 import tempfile
 import threading
-from typing import Protocol
+from typing import Protocol, Sequence
 
 import numpy as np
 
@@ -27,7 +28,12 @@ from audio_sync.config import (
     SyncMode,
     resolve_tool,
 )
-from audio_sync.core.models import AudioInfo, AudioProbeError, OutputSampleRate
+from audio_sync.core.models import (
+    AudioInfo,
+    AudioProbeError,
+    OffsetRegion,
+    OutputSampleRate,
+)
 from audio_sync.core.process_runner import run_binary_process, run_text_process
 from audio_sync.utils import scale_timeout_for_size
 
@@ -530,6 +536,17 @@ class FFmpegWrapper:
 
     # ── Senkronizasyon Uygulama ──────────────────────────────────────────
 
+    @staticmethod
+    def drift_tempo_factor(drift_ms_per_min: float) -> float:
+        """Convert a measured drift into the tempo factor that cancels it.
+
+        A drift of ``D`` ms/min means the lag between the two tracks grows by
+        ``D/60`` ms per second of reference time — the track being synchronized
+        is running slow by that fraction.  Speeding it up by ``1 - D/60000``
+        removes the growth and leaves a constant offset behind.
+        """
+        return 1.0 - (drift_ms_per_min / 60_000.0)
+
     def apply_sync(
         self,
         src_orig: str,
@@ -540,6 +557,8 @@ class FFmpegWrapper:
         out_path: str,
         sync_mode: SyncMode = SyncMode.ADELAY_AMIX,
         cancel_event: threading.Event | None = None,
+        drift_ms_per_min: float | None = None,
+        offset_regions: Sequence[OffsetRegion] | None = None,
     ) -> str:
         """Orijinal dosyaları senkronize eder, karıştırır ve WAV olarak yazar.
 
@@ -553,6 +572,8 @@ class FFmpegWrapper:
             output_sr: Çıktı örnekleme oranı kararı.
             out_path: Çıktı dosyası yolu.
             sync_mode: Senkronizasyon filtre modu.
+            drift_ms_per_min: Giderilecek ilerleyen drift (ms/dk).  ``None``
+                veya sıfır ise yalnızca sabit ofset uygulanır.
 
         Returns:
             Oluşturulan FFmpeg komutunun özet açıklaması (log için).
@@ -560,40 +581,16 @@ class FFmpegWrapper:
         Raises:
             RuntimeError: FFmpeg senkronizasyon hatası.
         """
-        channels = audio_info.channels
-        pcm_codec = audio_info.codec.codec_name
-        abs_ms = abs(delay_ms)
-
-        # Senkronizasyon moduna göre komut oluştur
-        if sync_mode == SyncMode.ADELAY_AMIX:
-            cmd, cmd_summary = self._build_sync_adelay_amix(
-                src_orig, sync_orig, delay_ms, abs_ms, channels, pcm_codec, output_sr, out_path,
-            )
-        elif sync_mode == SyncMode.ARESAMPLE:
-            cmd, cmd_summary = self._build_sync_aresample(
-                src_orig, sync_orig, delay_ms, abs_ms, channels, pcm_codec, output_sr, out_path,
-            )
-        elif sync_mode == SyncMode.ATEMPO:
-            cmd, cmd_summary = self._build_sync_atempo(
-                src_orig, sync_orig, delay_ms, abs_ms, channels, pcm_codec, output_sr, out_path,
-            )
-        elif sync_mode == SyncMode.RUBBERBAND:
-            cmd, cmd_summary = self._build_sync_rubberband(
-                src_orig, sync_orig, delay_ms, abs_ms, channels, pcm_codec, output_sr, out_path,
-            )
-        elif sync_mode == SyncMode.APAD:
-            cmd, cmd_summary = self._build_sync_apad(
-                src_orig, sync_orig, delay_ms, abs_ms, channels, pcm_codec, output_sr, out_path,
-            )
-        elif sync_mode == SyncMode.ASYNCTS:
-            cmd, cmd_summary = self._build_sync_asyncts(
-                src_orig, sync_orig, delay_ms, abs_ms, channels, pcm_codec, output_sr, out_path,
-            )
-        else:
-            # Fallback to default
-            cmd, cmd_summary = self._build_sync_adelay_amix(
-                src_orig, sync_orig, delay_ms, abs_ms, channels, pcm_codec, output_sr, out_path,
-            )
+        cmd, cmd_summary = self.build_sync_command(
+            sync_orig,
+            delay_ms,
+            audio_info,
+            output_sr,
+            out_path,
+            sync_mode=sync_mode,
+            drift_ms_per_min=drift_ms_per_min,
+            offset_regions=offset_regions,
+        )
 
         result = self._run_command(
             cmd,
@@ -606,174 +603,188 @@ class FFmpegWrapper:
 
         return cmd_summary
 
-    # ── Senkronizasyon Mod Oluşturucuları ─────────────────────────────────
+    # ── Senkronizasyon Filtre Zinciri ────────────────────────────────────
 
-    def _build_sync_adelay_amix(
-        self, src: str, sync: str, delay_ms: float, abs_ms: float,
-        channels: int, pcm_codec: str, output_sr: OutputSampleRate, out_path: str,
-    ) -> tuple[list[str], str]:
-        """adelay modu — yalnızca sync (hedef) ses çıktıya yazılır.
+    def build_piecewise_filter(
+        self,
+        regions: Sequence[OffsetRegion],
+        channels: int,
+    ) -> tuple[str, str]:
+        """Build a filter graph that applies a different offset per region.
 
-        src (referans) ses yalnızca gecikme hesabında kullanılır,
-        çıktıya dahil edilmez.
+        Each region is cut straight out of the source at the position its own
+        offset points to, then the pieces are concatenated.  Because the cuts
+        are taken in *reference* time, every piece keeps the duration it is
+        supposed to occupy, so the joins land exactly where the edit was.
+
+        A short fade is applied on either side of every internal join.  The
+        splice is a genuine discontinuity — that is the point — and without the
+        fade the waveform steps instantly, which is audible as a click.
+
+        Each region reads from its *own* input rather than from an ``asplit`` of
+        one.  Splitting a single decoder couples the branches: ``concat`` drains
+        the first piece while the later branches are handed frames they cannot
+        use yet, and whether that resolves depends on the FFmpeg build.  It ran
+        in well under a second locally and hung for over half an hour on the
+        FFmpeg that ships with Ubuntu.  Separate inputs decode independently, so
+        there is nothing to deadlock on; the cost is re-reading the file once per
+        region, bounded by ``step_max_regions``.
+
+        Returns:
+            ``(filter_chain, summary)`` — the chain ends at ``[spliced]`` so the
+            caller can still append the shared tail stages.
         """
-        delay_str = "|".join([f"{abs_ms:.3f}"] * channels)
+        if len(regions) < 2:
+            raise ValueError("piecewise sync needs at least two regions")
 
-        if delay_ms >= 0:
-            # Sync ses erkende → başına gecikme (sessizlik) ekle
-            flt = f"[0:a]adelay={delay_str}:all=1[out]"
+        fade = self._config.step_splice_fade_sec
+        labels: list[str] = []
+        parts: list[str] = []
+
+        for index, region in enumerate(regions):
+            lag_sec = region.lag_ms / 1000.0
+            src_start = region.start_sec - lag_sec
+            stages: list[str] = []
+
+            # A negative source position means the reference starts before this
+            # track does; the missing head is silence, not audio to seek to.
+            head_pad = max(0.0, -src_start)
+            trim = f"atrim=start={max(0.0, src_start):.6f}"
+            if math.isfinite(region.end_sec):
+                src_end = region.end_sec - lag_sec
+                trim += f":end={max(0.0, src_end):.6f}"
+            stages.append(trim)
+            stages.append("asetpts=PTS-STARTPTS")
+
+            if head_pad > 1e-6:
+                pad_stage, _note = self._build_offset_stage(head_pad * 1000.0, channels)
+                if pad_stage:
+                    stages.append(pad_stage)
+
+            duration = region.duration_sec
+            if index > 0:
+                stages.append(f"afade=t=in:st=0:d={fade:.4f}")
+            if index < len(regions) - 1 and math.isfinite(duration) and duration > fade * 4:
+                stages.append(
+                    f"afade=t=out:st={duration - fade:.6f}:d={fade:.4f}"
+                )
+
+            parts.append(f"[{index}:a]" + ",".join(stages) + f"[p{index}]")
+            labels.append(f"[p{index}]")
+
+        parts.append("".join(labels) + f"concat=n={len(regions)}:v=0:a=1[spliced]")
+
+        summary = "piecewise " + " | ".join(
+            f"{start:.1f}–{end}m {region.lag_ms:+.0f}ms"
+            for start, end, region in (
+                (*region.bounds_in_minutes(), region) for region in regions
+            )
+        )
+        return ";".join(parts), summary
+
+    def build_sync_command(
+        self,
+        sync_path: str,
+        delay_ms: float,
+        audio_info: AudioInfo,
+        output_sr: OutputSampleRate,
+        out_path: str,
+        *,
+        sync_mode: SyncMode = SyncMode.ADELAY_AMIX,
+        drift_ms_per_min: float | None = None,
+        offset_regions: Sequence[OffsetRegion] | None = None,
+    ) -> tuple[list[str], str]:
+        """Compose the FFmpeg command that writes the synchronized track.
+
+        Only the track being synchronized is written; the reference exists
+        purely to measure the offset against.
+
+        The filter chain is assembled in a fixed order — drift first, then the
+        constant offset — because a tempo change rescales everything downstream
+        of it.  Applying the offset first would shrink it by the tempo factor.
+
+        Args:
+            sync_path: Track to synchronize.
+            delay_ms: Constant offset.  Positive means the track runs early and
+                is delayed; negative means it runs late and its head is trimmed.
+                When ``drift_ms_per_min`` is supplied this must already be the
+                offset at ``t=0`` (``AnalysisResult.drift_intercept_ms``), not
+                the median offset.
+            audio_info: Metadata of the track being synchronized.
+            output_sr: Output sample-rate decision.
+            out_path: Destination path.
+            sync_mode: Filter strategy.
+            drift_ms_per_min: Progressive drift to cancel, or ``None``/0.
+            offset_regions: Two or more regions to splice, each with its own
+                offset.  Takes precedence over ``delay_ms`` and
+                ``drift_ms_per_min``: a step is not something a single offset
+                or a straight line can express.
+
+        Returns:
+            ``(command, summary)`` — the summary is what the UI logs.
+        """
+        channels = audio_info.channels
+        pcm_codec = audio_info.codec.codec_name
+
+        notes: list[str] = []
+        head = ""
+        entry = "[0:a]"
+        input_count = 1
+
+        if offset_regions and len(offset_regions) > 1:
+            head, piecewise_note = self.build_piecewise_filter(offset_regions, channels)
+            notes.append(piecewise_note)
+            entry = "[spliced]"
+            # One input per region: the graph reads each piece from its own
+            # decoder rather than splitting one, which is what keeps it from
+            # deadlocking on some FFmpeg builds.
+            input_count = len(offset_regions)
+            stages = []
         else:
-            # Sync ses geçte → başından kırp
-            trim_sec = abs_ms / 1000.0
-            flt = f"[0:a]atrim=start={trim_sec:.6f},asetpts=PTS-STARTPTS[out]"
+            stages = []
+            effective_delay_ms = float(delay_ms)
+            drift = float(drift_ms_per_min or 0.0)
+            if drift:
+                tempo_filter, factor, drift_note = self._build_drift_stage(drift, sync_mode)
+                stages.append(tempo_filter)
+                notes.append(drift_note)
+                # The offset is measured on the original timeline; once the
+                # track is retimed by ``factor`` the same wall-clock gap sits at
+                # a different position, so it has to be rescaled to match.
+                if factor > 0:
+                    effective_delay_ms /= factor
+
+            offset_stage, offset_note = self._build_offset_stage(
+                effective_delay_ms, channels
+            )
+            if offset_stage:
+                stages.append(offset_stage)
+            notes.append(offset_note)
+
+        # The mode tail answers "my source has broken timestamps", which is
+        # independent of how many offsets the file needs.  It used to be applied
+        # only on the non-piecewise path, so choosing Repair timestamps on a
+        # stepped file silently did nothing while the summary still claimed it.
+        tail_stage = self._MODE_TAIL_FILTERS.get(sync_mode)
+        if tail_stage:
+            stages.append(tail_stage)
+            notes.append(tail_stage)
+
+        chain = ",".join(stages) if stages else "acopy"
+        flt = f"{head};{entry}{chain}[out]" if head else f"[0:a]{chain}[out]"
 
         cmd = [
             resolve_tool("ffmpeg"),
             "-v", "error",
             "-nostdin",
             "-y",
-            "-i", sync,  # Yalnızca sync/hedef dosya
-            "-filter_complex", flt,
-            "-map", "[out]",
         ]
-
-        if output_sr.needs_resample:
-            cmd.extend(["-ar", str(output_sr.rate)])
-
+        for _ in range(input_count):
+            cmd.extend(["-i", sync_path])
         cmd.extend([
-            "-ac", str(channels),
-            "-acodec", pcm_codec,
-            "-rf64", "auto",
-            out_path,
-        ])
-
-        resample_part = f"-ar {output_sr.rate} " if output_sr.needs_resample else ""
-        summary = f"[adelay] ffmpeg … {resample_part}-ac {channels} -acodec {pcm_codec} -rf64 auto"
-        return cmd, summary
-
-    def _build_sync_aresample(
-        self, src: str, sync: str, delay_ms: float, abs_ms: float,
-        channels: int, pcm_codec: str, output_sr: OutputSampleRate, out_path: str,
-    ) -> tuple[list[str], str]:
-        """aresample modu — yalnızca sync (hedef) ses çıktıya yazılır.
-
-        Sync dosyasına adelay + aresample uygular.
-        src (referans) ses çıktıya dahil edilmez.
-        """
-        delay_str = "|".join([f"{abs_ms:.3f}"] * channels)
-
-        if delay_ms >= 0:
-            # Sync ses erkende → başına gecikme ekle + aresample
-            flt = f"[0:a]adelay={delay_str}:all=1,aresample=async=1[out]"
-        else:
-            # Sync ses geçte → başından kırp + aresample
-            trim_sec = abs_ms / 1000.0
-            flt = f"[0:a]atrim=start={trim_sec:.6f},asetpts=PTS-STARTPTS,aresample=async=1[out]"
-
-        cmd = [
-            resolve_tool("ffmpeg"),
-            "-v", "error",
-            "-nostdin",
-            "-y",
-            "-i", sync,  # Yalnızca sync/hedef dosya
             "-filter_complex", flt,
             "-map", "[out]",
-        ]
-
-        if output_sr.needs_resample:
-            cmd.extend(["-ar", str(output_sr.rate)])
-
-        cmd.extend([
-            "-ac", str(channels),
-            "-acodec", pcm_codec,
-            "-rf64", "auto",
-            out_path,
         ])
-
-        resample_part = f"-ar {output_sr.rate} " if output_sr.needs_resample else ""
-        summary = f"[aresample] ffmpeg … {resample_part}-ac {channels} -acodec {pcm_codec} -rf64 auto"
-        return cmd, summary
-
-    def _build_sync_atempo(
-        self, src: str, sync: str, delay_ms: float, abs_ms: float,
-        channels: int, pcm_codec: str, output_sr: OutputSampleRate, out_path: str,
-    ) -> tuple[list[str], str]:
-        """Geriye uyumlu atempo modu — kesin sabit ofset uygular.
-
-        Sabit bir ofseti ilk saniyelere tempo değişikliği olarak yaymak yerine
-        her iki yönde de ``adelay``/``atrim`` kullanır. ``src`` (referans) ses
-        yalnızca analiz içindir ve çıktıya dahil edilmez.
-        """
-        delay_sec = abs_ms / 1000.0
-        delay_str = "|".join([f"{abs_ms:.3f}"] * channels)
-
-        mode_detail = "copy"
-
-        if abs_ms <= 0.01:
-            flt = "[0:a]acopy[out]"
-            mode_detail = "copy"
-        elif delay_ms >= 0:
-            flt = f"[0:a]adelay={delay_str}:all=1[out]"
-            mode_detail = f"adelay={abs_ms:.3f}ms"
-        else:
-            flt = f"[0:a]atrim=start={delay_sec:.6f},asetpts=PTS-STARTPTS[out]"
-            mode_detail = f"atrim={delay_sec:.3f}s"
-
-        cmd = [
-            resolve_tool("ffmpeg"),
-            "-v", "error",
-            "-nostdin",
-            "-y",
-            "-i", sync,  # Yalnızca sync/hedef dosya
-            "-filter_complex", flt,
-            "-map", "[out]",
-        ]
-
-        if output_sr.needs_resample:
-            cmd.extend(["-ar", str(output_sr.rate)])
-
-        cmd.extend([
-            "-ac", str(channels),
-            "-acodec", pcm_codec,
-            "-rf64", "auto",
-            out_path,
-        ])
-
-        resample_part = f"-ar {output_sr.rate} " if output_sr.needs_resample else ""
-        summary = f"[atempo] {mode_detail} | {resample_part}-ac {channels} -acodec {pcm_codec} -rf64 auto"
-        return cmd, summary
-
-    def _build_sync_rubberband(
-        self, src: str, sync: str, delay_ms: float, abs_ms: float,
-        channels: int, pcm_codec: str, output_sr: OutputSampleRate, out_path: str,
-    ) -> tuple[list[str], str]:
-        """rubberband modu — yalnızca sync (hedef) ses çıktıya yazılır.
-
-        librubberband tabanlı pitch-korumalı zaman uzatma kullanır.
-        FFmpeg'in ``--enable-librubberband`` ile derlenmiş olması gerekir.
-        src (referans) ses çıktıya dahil edilmez.
-        """
-        delay_sec = abs_ms / 1000.0
-        delay_str = "|".join([f"{abs_ms:.3f}"] * channels)
-
-        _rb = "rubberband=tempo=1.0:pitch=1.0:transients=smooth:detector=compound"
-
-        if delay_ms >= 0:
-            # Sync ses erkende → başına gecikme ekle + rubberband kalite iyileştirme
-            flt = f"[0:a]adelay={delay_str}:all=1,{_rb}[out]"
-        else:
-            # Sync ses geçte → başından kırp + rubberband kalite iyileştirme
-            flt = f"[0:a]atrim=start={delay_sec:.6f},asetpts=PTS-STARTPTS,{_rb}[out]"
-
-        cmd = [
-            resolve_tool("ffmpeg"),
-            "-v", "error",
-            "-nostdin",
-            "-y",
-            "-i", sync,  # Yalnızca sync/hedef dosya
-            "-filter_complex", flt,
-            "-map", "[out]",
-        ]
 
         if output_sr.needs_resample:
             cmd.extend(["-ar", str(output_sr.rate)])
@@ -787,96 +798,67 @@ class FFmpegWrapper:
 
         resample_part = f"-ar {output_sr.rate} " if output_sr.needs_resample else ""
         summary = (
-            f"[rubberband] delay={delay_ms:+.1f}ms | "
+            f"[{sync_mode.filter_name}] {' | '.join(notes)} | "
             f"{resample_part}-ac {channels} -acodec {pcm_codec} -rf64 auto"
         )
         return cmd, summary
 
-    def _build_sync_apad(
-        self, src: str, sync: str, delay_ms: float, abs_ms: float,
-        channels: int, pcm_codec: str, output_sr: OutputSampleRate, out_path: str,
-    ) -> tuple[list[str], str]:
-        """apad modu — yalnızca sync (hedef) ses çıktıya yazılır.
+    # Extra stage appended after the offset.  These only matter for inputs whose
+    # timestamps are themselves broken (stream captures, VFR remuxes); on a
+    # well-formed file they are no-ops, which is exactly why the modes that used
+    # to differ only by a passthrough filter no longer exist.
+    _MODE_TAIL_FILTERS: dict[SyncMode, str] = {
+        SyncMode.ARESAMPLE: "aresample=async=1",
+    }
 
-        Gecikme yönüne göre sync sesine adelay veya atrim uygular.
-        src (referans) ses çıktıya dahil edilmez.
+    @staticmethod
+    def _build_offset_stage(delay_ms: float, channels: int) -> tuple[str, str]:
+        """Build the constant-offset stage of the chain."""
+        abs_ms = abs(delay_ms)
+        if abs_ms <= 0.01:
+            return "", "offset 0 ms"
+
+        if delay_ms > 0:
+            # Track runs early → pad the head with silence.
+            delay_str = "|".join([f"{abs_ms:.3f}"] * max(1, channels))
+            return f"adelay={delay_str}:all=1", f"adelay {abs_ms:.1f} ms"
+
+        # Track runs late → drop the head.
+        trim_sec = abs_ms / 1000.0
+        return (
+            f"atrim=start={trim_sec:.6f},asetpts=PTS-STARTPTS",
+            f"atrim {trim_sec:.3f} s",
+        )
+
+    @staticmethod
+    def _build_drift_stage(
+        drift_ms_per_min: float,
+        sync_mode: SyncMode,
+    ) -> tuple[str, float, str]:
+        """Build the time-stretch stage that cancels a progressive drift.
+
+        ``rubberband`` is offered as a genuine alternative engine here rather
+        than as a passthrough: for a track that needs retiming it is the higher
+        quality stretcher, and for a track that does not it is never inserted.
+
+        ``atempo`` is the default because it takes the factor as a float.  An
+        ``asetrate`` resample chain would have to round to an integer sample
+        rate, leaving roughly 0.5 ms/min of uncorrected drift on a 0.1 %
+        correction — enough for an hour of audio to still slide half a frame.
         """
-        delay_str = "|".join([f"{abs_ms:.3f}"] * channels)
-
-        if delay_ms >= 0:
-            # Sync ses erkende → başına gecikme ekle
-            flt = f"[0:a]adelay={delay_str}:all=1[out]"
-        else:
-            # Sync ses geçte → başından kırp
-            trim_sec = abs_ms / 1000.0
-            flt = f"[0:a]atrim=start={trim_sec:.6f},asetpts=PTS-STARTPTS[out]"
-
-        cmd = [
-            resolve_tool("ffmpeg"),
-            "-v", "error",
-            "-nostdin",
-            "-y",
-            "-i", sync,  # Yalnızca sync/hedef dosya
-            "-filter_complex", flt,
-            "-map", "[out]",
-        ]
-
-        if output_sr.needs_resample:
-            cmd.extend(["-ar", str(output_sr.rate)])
-
-        cmd.extend([
-            "-ac", str(channels),
-            "-acodec", pcm_codec,
-            "-rf64", "auto",
-            out_path,
-        ])
-
-        resample_part = f"-ar {output_sr.rate} " if output_sr.needs_resample else ""
-        summary = f"[apad] ffmpeg … {resample_part}-ac {channels} -acodec {pcm_codec} -rf64 auto"
-        return cmd, summary
-
-    def _build_sync_asyncts(
-        self, src: str, sync: str, delay_ms: float, abs_ms: float,
-        channels: int, pcm_codec: str, output_sr: OutputSampleRate, out_path: str,
-    ) -> tuple[list[str], str]:
-        """asyncts modu — yalnızca sync (hedef) ses çıktıya yazılır.
-
-        aresample=async=1000 ile agresif senkronizasyon yapar.
-        src (referans) ses çıktıya dahil edilmez.
-        """
-        delay_str = "|".join([f"{abs_ms:.3f}"] * channels)
-
-        if delay_ms >= 0:
-            # Sync ses erkende → başına gecikme ekle + asyncts
-            flt = f"[0:a]adelay={delay_str}:all=1,aresample=async=1000[out]"
-        else:
-            # Sync ses geçte → başından kırp + asyncts
-            trim_sec = abs_ms / 1000.0
-            flt = f"[0:a]atrim=start={trim_sec:.6f},asetpts=PTS-STARTPTS,aresample=async=1000[out]"
-
-        cmd = [
-            resolve_tool("ffmpeg"),
-            "-v", "error",
-            "-nostdin",
-            "-y",
-            "-i", sync,  # Yalnızca sync/hedef dosya
-            "-filter_complex", flt,
-            "-map", "[out]",
-        ]
-
-        if output_sr.needs_resample:
-            cmd.extend(["-ar", str(output_sr.rate)])
-
-        cmd.extend([
-            "-ac", str(channels),
-            "-acodec", pcm_codec,
-            "-rf64", "auto",
-            out_path,
-        ])
-
-        resample_part = f"-ar {output_sr.rate} " if output_sr.needs_resample else ""
-        summary = f"[asyncts] ffmpeg … {resample_part}-ac {channels} -acodec {pcm_codec} -rf64 auto"
-        return cmd, summary
+        factor = FFmpegWrapper.drift_tempo_factor(drift_ms_per_min)
+        if sync_mode is SyncMode.RUBBERBAND:
+            return (
+                f"rubberband=tempo={factor:.12f}:pitch=1.0"
+                f":transients=smooth:detector=compound",
+                factor,
+                f"drift {drift_ms_per_min:+.2f} ms/min → rubberband tempo={factor:.9f}",
+            )
+        return (
+            f"atempo={factor:.12f}",
+            factor,
+            f"drift {drift_ms_per_min:+.2f} ms/min → atempo={factor:.9f}",
+        )
 
     # ── FFmpeg AC3/EAC3 Encoding ────────────────────────────────────────
 

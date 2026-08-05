@@ -12,8 +12,8 @@ import numpy as np
 from scipy.io import wavfile
 from scipy.signal import butter, correlate, fftconvolve, sosfilt, sosfiltfilt
 
-from audio_sync.config import SYNC_CONFIG, SyncConfig
-from audio_sync.core.models import AnalysisResult
+from audio_sync.config import SYNC_CONFIG, FpsConversion, SyncConfig
+from audio_sync.core.models import AnalysisResult, OffsetRegion
 
 ANALYSIS_DTYPE = np.float32
 _INT16_INFO = np.iinfo(np.int16)
@@ -311,7 +311,7 @@ class AudioAnalyzer:
             peak=sync_peak,
         )
 
-        return self._calculate_delay_from_features(
+        result = self._calculate_delay_from_features(
             rate,
             src_features,
             sync_features,
@@ -320,6 +320,229 @@ class AudioAnalyzer:
             skip_fallback=skip_fallback,
             fingerprint_estimate=fingerprint_estimate,
         )
+
+        return self._locate_boundaries_in_audio(
+            result,
+            rate,
+            src_pcm_path,
+            sync_pcm_path,
+            src_mean=src_mean,
+            src_peak=src_peak,
+            sync_mean=sync_mean,
+            sync_peak=sync_peak,
+        )
+
+    def _locate_boundaries_in_audio(
+        self,
+        result: AnalysisResult,
+        rate: int,
+        src_pcm_path: str,
+        sync_pcm_path: str,
+        *,
+        src_mean: float,
+        src_peak: float,
+        sync_mean: float,
+        sync_peak: float,
+    ) -> AnalysisResult:
+        """Pin each step boundary down by asking the audio, not the windows.
+
+        Segmentation can only place a boundary midway between the last window
+        that supports one offset and the first that supports the next.  Where
+        the validated windows are sparse — a stretch of score, ambience or
+        anything else that correlates poorly — that midpoint can be ten minutes
+        away from the actual edit, and every minute in between receives the
+        wrong region's offset.
+
+        Both candidate offsets are known by this point, so the boundary can be
+        found directly: at a candidate time, whichever offset aligns the two
+        tracks better tells us which side of the edit we are on.  That predicate
+        flips exactly once, so a bisection converges on the edit in a handful of
+        reads.
+        """
+        cfg = self._config
+        regions = result.offset_regions
+        if len(regions) < 2 or not cfg.step_boundary_audio_search:
+            return result
+
+        refined: list[OffsetRegion] = list(regions)
+        for index in range(len(refined) - 1):
+            left, right = refined[index], refined[index + 1]
+            low = max(left.evidence_end_sec, left.start_sec)
+            high = right.evidence_start_sec
+            if high - low < cfg.step_boundary_search_min_gap_sec:
+                continue
+
+            boundary = self._bisect_boundary(
+                rate,
+                src_pcm_path,
+                sync_pcm_path,
+                low=low,
+                high=high,
+                left_lag_ms=left.lag_ms,
+                right_lag_ms=right.lag_ms,
+                src_mean=src_mean,
+                src_peak=src_peak,
+                sync_mean=sync_mean,
+                sync_peak=sync_peak,
+            )
+            if boundary is None:
+                continue
+
+            refined[index] = replace(left, end_sec=boundary)
+            refined[index + 1] = replace(right, start_sec=boundary)
+
+        return replace(result, offset_regions=tuple(refined))
+
+    def _bisect_boundary(
+        self,
+        rate: int,
+        src_pcm_path: str,
+        sync_pcm_path: str,
+        *,
+        low: float,
+        high: float,
+        left_lag_ms: float,
+        right_lag_ms: float,
+        src_mean: float,
+        src_peak: float,
+        sync_mean: float,
+        sync_peak: float,
+    ) -> float | None:
+        """Bisect ``[low, high]`` for the moment the better offset changes."""
+        cfg = self._config
+        probe = cfg.step_boundary_probe_sec
+
+        for _ in range(cfg.step_boundary_search_iterations):
+            if high - low <= cfg.step_boundary_search_precision_sec:
+                break
+
+            middle = (low + high) / 2.0
+            verdict = None
+            # Silence, ambience or score can leave a probe unable to tell the
+            # two offsets apart.  That says nothing about which side of the edit
+            # we are on, so step aside and ask again rather than abandoning a
+            # search that is otherwise converging.
+            for shift in self._probe_offsets(probe):
+                at = middle + shift
+                if not low < at < high:
+                    continue
+                verdict = self._offset_preference(
+                    rate,
+                    src_pcm_path,
+                    sync_pcm_path,
+                    at_sec=at,
+                    probe_sec=probe,
+                    left_lag_ms=left_lag_ms,
+                    right_lag_ms=right_lag_ms,
+                    src_mean=src_mean,
+                    src_peak=src_peak,
+                    sync_mean=sync_mean,
+                    sync_peak=sync_peak,
+                )
+                if verdict is not None:
+                    break
+
+            if verdict is None:
+                # Nothing around this point is decisive; stop here and keep the
+                # bracket found so far, which is still better than the original.
+                break
+            if verdict > 0:
+                # The earlier offset still wins here, so the edit is later.
+                low = middle
+            else:
+                high = middle
+
+        return (low + high) / 2.0
+
+    @staticmethod
+    def _probe_offsets(probe_sec: float) -> tuple[float, ...]:
+        """Sample points to try around a midpoint, nearest first."""
+        step = probe_sec * 1.5
+        return (0.0, step, -step, step * 2.0, -step * 2.0, step * 3.0, -step * 3.0)
+
+    def _offset_preference(
+        self,
+        rate: int,
+        src_pcm_path: str,
+        sync_pcm_path: str,
+        *,
+        at_sec: float,
+        probe_sec: float,
+        left_lag_ms: float,
+        right_lag_ms: float,
+        src_mean: float,
+        src_peak: float,
+        sync_mean: float,
+        sync_peak: float,
+    ) -> float | None:
+        """Positive when the left offset explains ``at_sec`` better."""
+        length = int(probe_sec * rate)
+        start = int(at_sec * rate)
+        reference = self._normalized_envelope(
+            src_pcm_path, start, length, src_mean, src_peak, rate
+        )
+        if reference is None:
+            return None
+
+        scores: list[float] = []
+        for lag_ms in (left_lag_ms, right_lag_ms):
+            offset_start = start - int(lag_ms / 1000.0 * rate)
+            if offset_start < 0:
+                return None
+            candidate = self._normalized_envelope(
+                sync_pcm_path, offset_start, length, sync_mean, sync_peak, rate
+            )
+            if candidate is None:
+                return None
+            size = min(reference.size, candidate.size)
+            scores.append(float(np.dot(reference[:size], candidate[:size]) / size))
+
+        difference = scores[0] - scores[1]
+        if abs(difference) < self._config.step_boundary_min_margin:
+            # Neither offset is convincingly better here — silence, ambience or
+            # music that matches itself. Bisecting on a coin flip would move the
+            # boundary somewhere arbitrary, so keep the midpoint estimate.
+            return None
+        return difference
+
+    def _normalized_envelope(
+        self,
+        pcm_path: str,
+        start_sample: int,
+        length: int,
+        mean: float,
+        peak: float,
+        rate: int,
+    ) -> np.ndarray | None:
+        """Zero-mean unit-variance onset envelope for one stretch of PCM."""
+        total = self._raw_pcm_sample_count(pcm_path)
+        if start_sample < 0 or start_sample + length > total or length <= rate:
+            return None
+
+        raw = self._read_pcm_range(pcm_path, start_sample, start_sample + length)
+        if raw.size < length:
+            return None
+
+        chunk = raw.astype(ANALYSIS_DTYPE)
+        chunk *= _INT16_SCALE
+        chunk -= ANALYSIS_DTYPE(mean)
+        chunk *= ANALYSIS_DTYPE(1.0 / peak)
+
+        window = max(8, rate // 50)
+        kernel = np.full(window, 1.0 / window, dtype=np.float64)
+        # ``fftconvolve`` rather than ``np.convolve``: a 24-second probe is
+        # ~384k samples against a 320-tap kernel, and the direct method costs
+        # roughly 10 ms per envelope against 2 ms here.  Three envelopes are
+        # built per probe and a bisection runs many probes.
+        energy = np.sqrt(
+            np.abs(fftconvolve(chunk.astype(np.float64) ** 2, kernel, mode="same"))
+        )
+        onset = np.maximum(np.diff(energy, prepend=energy[0]), 0.0)
+        onset -= onset.mean()
+        deviation = onset.std()
+        if deviation < 1e-9:
+            return None
+        return onset / deviation
 
     @staticmethod
     def normalize_audio(data: np.ndarray) -> np.ndarray:
@@ -499,6 +722,21 @@ class AudioAnalyzer:
             ),
         ]
 
+        drift_candidate = self._coarse_drift_candidate(
+            src_features.coarse,
+            sync_features.coarse,
+            coarse_rate,
+            fine_rate,
+            skip_samples=skip_samples,
+            rate=rate,
+        )
+        if drift_candidate is not None:
+            candidates.append(drift_candidate)
+
+        rate_mismatch = self.detect_rate_mismatch(
+            src_features.coarse, sync_features.coarse
+        )
+
         if fingerprint_estimate is not None:
             fingerprint_anchors = self._convert_fingerprint_anchors(
                 fingerprint_estimate.anchors,
@@ -579,7 +817,169 @@ class AudioAnalyzer:
 
         if best_result is None:
             raise RuntimeError("Analiz sonucu olusturulamadi.")
+
+        if rate_mismatch is not None:
+            best_result = replace(
+                best_result, suspected_fps_conversion=rate_mismatch[0].name
+            )
         return best_result
+
+    def detect_rate_mismatch(
+        self,
+        src_coarse: np.ndarray,
+        sync_coarse: np.ndarray,
+    ) -> tuple[FpsConversion, float] | None:
+        """Test whether the two tracks are the same content at different rates.
+
+        Measuring the slope and then naming it only works when the slope can be
+        measured, and on the worst files it cannot: a 132-minute pair whose
+        offset slid by 7.8 seconds reported a drift of -2 ms/min, because the
+        segment search can only confirm windows near one lag and everything else
+        fell outside it.
+
+        Asking the question directly is both cheaper and more robust.  A frame
+        rate mismatch is one fixed ratio out of a handful of standards, so the
+        target's feature stream is simply resampled by each of them and scored
+        against the reference.  If one of those ratios explains the pair better
+        than leaving it alone, that is the answer — and it is available before
+        any of the fine analysis runs.
+
+        Returns:
+            ``(conversion, improvement)`` where improvement is how much better
+            the winning ratio scored than no conversion, or ``None``.
+        """
+        cfg = self._config
+        if not cfg.rate_mismatch_detection or src_coarse.size < 64:
+            return None
+
+        _identity_lag, identity_score = self.best_lag(src_coarse, sync_coarse)
+        if identity_score <= 0:
+            return None
+
+        best: tuple[FpsConversion, float] | None = None
+        best_score = identity_score * cfg.rate_mismatch_min_gain
+
+        for conversion in FpsConversion:
+            # Applying the conversion multiplies the target's timeline by this
+            # much, so its feature stream stretches by the same factor.
+            factor = conversion.tempo_ratio
+            stretched = self._resample_features(sync_coarse, factor)
+            if stretched.size < 32:
+                continue
+            _lag, score = self.best_lag(src_coarse, stretched)
+            if score > best_score:
+                best_score = score
+                best = (conversion, score / identity_score)
+
+        return best
+
+    @staticmethod
+    def _resample_features(features: np.ndarray, factor: float) -> np.ndarray:
+        """Stretch a feature stream by ``factor`` on its time axis."""
+        if features.size == 0 or factor <= 0:
+            return features
+        length = int(round(features.size * factor))
+        if length < 2:
+            return np.empty(0, dtype=ANALYSIS_DTYPE)
+        source = np.linspace(0.0, features.size - 1, length)
+        return np.asarray(
+            np.interp(source, np.arange(features.size), features),
+            dtype=ANALYSIS_DTYPE,
+        )
+
+    def _coarse_drift_candidate(
+        self,
+        src_coarse: np.ndarray,
+        sync_coarse: np.ndarray,
+        coarse_rate: float,
+        fine_rate: float,
+        *,
+        skip_samples: int,
+        rate: int,
+    ) -> _CandidateSpec | None:
+        """Propose an interpolated candidate when the file's ends disagree.
+
+        Segment validation only searches ``local_search_sec`` around a single
+        coarse lag.  When two encodes run at different clock rates the offset at
+        the end of a feature film can be seconds away from the offset at the
+        start, so most of the file falls outside that window and never
+        validates: on a 132-minute test the true offset slid from +40.3 s to
+        +32.5 s and the analyzer measured the drift as -2 ms/min with an R² of
+        0.09, because the only windows it could confirm were the handful near
+        wherever the whole-file correlation happened to peak.
+
+        Correlating the first and last thirds separately gives two lags far
+        enough apart in time to define a line, which is fed in as a pair of
+        anchors — the same mechanism the fingerprint path already uses, so
+        segment validation follows the slope instead of fighting it.
+        """
+        cfg = self._config
+        length = min(src_coarse.size, sync_coarse.size)
+        third = length // 3
+        if third < int(cfg.segment_duration_sec * coarse_rate) or sync_coarse.size == 0:
+            return None
+
+        head = self._lag_within(src_coarse, sync_coarse, 0, third)
+        tail = self._lag_within(src_coarse, sync_coarse, length - third, length)
+        if head is None or tail is None:
+            return None
+
+        head_lag, head_score = head
+        tail_lag, tail_score = tail
+
+        spread_sec = abs(tail_lag - head_lag) / coarse_rate
+        # Below the search window the default candidate already covers it, and a
+        # two-point line fitted to noise would only mislead the validation.
+        if spread_sec < cfg.coarse_drift_min_spread_sec:
+            return None
+        if spread_sec > cfg.coarse_drift_max_spread_sec:
+            return None
+        if min(head_score, tail_score) < cfg.coarse_drift_min_score:
+            return None
+
+        head_centre_frames = third / 2.0
+        tail_centre_frames = length - (third / 2.0)
+        scale = fine_rate / coarse_rate
+        fine_skip = skip_samples / rate * fine_rate
+
+        anchors = tuple(
+            _LagAnchor(
+                center_frame=max(fine_skip, centre * scale),
+                lag_frame=lag * scale,
+                weight=max(1.0, score),
+            )
+            for centre, lag, score in (
+                (head_centre_frames, head_lag, head_score),
+                (tail_centre_frames, tail_lag, tail_score),
+            )
+        )
+
+        midpoint_lag_fine = int(round((head_lag + tail_lag) / 2.0 * scale))
+        return _CandidateSpec(
+            coarse_lag_fine=midpoint_lag_fine,
+            coarse_ms=(head_lag + tail_lag) / 2.0 / coarse_rate * 1000.0,
+            score=float(min(head_score, tail_score)),
+            anchors=anchors,
+            local_search_sec=cfg.anchor_local_search_sec,
+        )
+
+    def _lag_within(
+        self,
+        src_coarse: np.ndarray,
+        sync_coarse: np.ndarray,
+        start: int,
+        stop: int,
+    ) -> tuple[float, float] | None:
+        """Best lag for one slice of the reference against the whole target."""
+        slice_ = src_coarse[start:stop]
+        if slice_.size < 8 or float(np.std(slice_)) < 1e-6:
+            return None
+
+        # ``best_lag`` reports the shift between the slice and the target; the
+        # slice starts ``start`` frames into the reference, so that offset has
+        # to be added back to express the lag on the reference timeline.
+        lag, score = self.best_lag(slice_, sync_coarse)
+        return float(lag + start), float(score)
 
     def _convert_fingerprint_anchors(
         self,
@@ -1571,6 +1971,382 @@ class AudioAnalyzer:
 
         return fallback_lag
 
+    def _detect_offset_regions(
+        self,
+        segment_results: list[dict[str, float]],
+        fine_rate: float,
+    ) -> tuple[OffsetRegion, ...]:
+        """Split the measured windows into runs of constant offset.
+
+        A broadcast dub is often not one delay away from the reference: an ad
+        break trimmed differently, a reel change, or a different cut leaves a
+        *step* partway through the film.  Neither a constant offset nor a
+        straight line describes that, so the offset is modelled piecewise.
+
+        Binary segmentation is used with a weighted-median model and an L1
+        cost, which is what makes it survive the outliers the correlation
+        inevitably produces: a couple of wild windows shift a mean, but not a
+        median.  Every split has to earn itself — a real jump in offset, enough
+        supporting windows on both sides, and enough runtime on both sides —
+        because splicing the audio for a phantom step is far worse than
+        carrying a small constant error.
+        """
+        cfg = self._config
+        if not cfg.step_detection_enabled or len(segment_results) < 2:
+            return ()
+
+        # Only windows that correlated convincingly get a say.  A step is a
+        # claim about the content, and a window that barely rose above its own
+        # noise floor is not evidence of anything.
+        rows = sorted(
+            (r for r in segment_results if r["score"] >= cfg.step_min_window_score),
+            key=lambda r: r["center_sec"],
+        )
+        if len(rows) < cfg.step_min_windows * 2:
+            return ()
+
+        times = np.array([r["center_sec"] for r in rows], dtype=np.float64)
+        lags_ms = np.array(
+            [r["lag"] / fine_rate * 1000.0 for r in rows], dtype=np.float64
+        )
+        scores = np.array([max(1.0, r["score"]) for r in rows], dtype=np.float64)
+        weights = self._cap_segment_weights(scores)
+
+        keep = self._reject_isolated_outliers(lags_ms)
+        if int(np.count_nonzero(keep)) < cfg.step_min_windows * 2:
+            return ()
+        times, lags_ms, weights, scores = (
+            times[keep], lags_ms[keep], weights[keep], scores[keep],
+        )
+
+        bounds = self._binary_segment(times, lags_ms, weights, 0, times.size)
+        cut_points = sorted(bounds)
+        if not cut_points:
+            return ()
+
+        cut_points = self._refine_boundaries(lags_ms, weights, cut_points)
+
+        # A steadily growing offset is drift, and stretching the track is both
+        # cheaper and cleaner than cutting it.  Binary segmentation will happily
+        # approximate a ramp with a staircase, so the piecewise model has to
+        # beat a straight line by a clear margin before the audio gets spliced.
+        if not self._steps_beat_a_straight_line(times, lags_ms, weights, cut_points):
+            return ()
+
+        edges = [0, *cut_points, times.size]
+        regions: list[OffsetRegion] = []
+        for index, (lo, hi) in enumerate(zip(edges, edges[1:])):
+            centre = self._weighted_median(lags_ms[lo:hi], weights[lo:hi])
+            # Boundaries sit midway between the last window of one run and the
+            # first of the next; the true edit is somewhere in that gap and the
+            # midpoint is the least-wrong guess without finer search.
+            start = 0.0 if index == 0 else (times[lo - 1] + times[lo]) / 2.0
+            end = math.inf if hi == times.size else (times[hi - 1] + times[hi]) / 2.0
+            regions.append(
+                OffsetRegion(
+                    start_sec=float(start),
+                    end_sec=float(end),
+                    lag_ms=float(centre),
+                    window_count=int(hi - lo),
+                    confidence=float(np.median(scores[lo:hi])),
+                    # Where the supporting windows actually sit.  The boundary
+                    # itself is only known to lie somewhere between one run's
+                    # last window and the next run's first, and that bracket is
+                    # what a later audio search needs to narrow down.
+                    evidence_start_sec=float(times[lo]),
+                    evidence_end_sec=float(times[hi - 1]),
+                )
+            )
+
+        return tuple(regions)
+
+    def _refine_boundaries(
+        self,
+        lags_ms: np.ndarray,
+        weights: np.ndarray,
+        cut_points: list[int],
+    ) -> list[int]:
+        """Nudge each boundary to its best position given the others.
+
+        Binary segmentation commits to whichever split looked best while the
+        rest of the file was still one lump, so a boundary can settle several
+        windows away from the edit it represents.  Every window between the
+        found position and the true one then receives the wrong region's offset.
+
+        Re-optimising one boundary at a time until nothing moves is cheap and
+        converges quickly, because each pass can only lower the same L1 cost the
+        segmentation itself minimises.
+        """
+        cuts = list(cut_points)
+        for _pass in range(self._config.step_boundary_refine_passes):
+            moved = False
+            for position, cut in enumerate(cuts):
+                low = cuts[position - 1] if position else 0
+                high = cuts[position + 1] if position + 1 < len(cuts) else lags_ms.size
+
+                best_cut, best_cost = cut, math.inf
+                span = self._config.step_min_windows
+                for candidate in range(low + span, high - span + 1):
+                    cost = self._l1_cost(
+                        lags_ms[low:candidate], weights[low:candidate]
+                    ) + self._l1_cost(
+                        lags_ms[candidate:high], weights[candidate:high]
+                    )
+                    if cost < best_cost:
+                        best_cost, best_cut = cost, candidate
+
+                if best_cut != cut:
+                    cuts[position] = best_cut
+                    moved = True
+
+            if not moved:
+                break
+
+        return sorted(set(cuts))
+
+    def _reject_isolated_outliers(self, lags_ms: np.ndarray) -> np.ndarray:
+        """Drop windows that agree with neither the run before nor the one after.
+
+        Cross-correlation occasionally locks onto the wrong peak and returns a
+        lag that is seconds away from the truth.  Left in, one such window
+        hijacks the segmentation: splitting it off into a region of its own
+        removes more cost than the real step does, so the greedy search takes it
+        and the genuine boundary is never found.
+
+        The test compares each window against the median of its neighbours on
+        each side separately and keeps the *better* of the two.  That is what
+        distinguishes the two cases that both look like a jump: a window sitting
+        on a real step boundary matches the side it belongs to, while a spurious
+        lag matches neither.
+        """
+        cfg = self._config
+        count = lags_ms.size
+        span = max(1, cfg.step_outlier_neighbours)
+        if count < span * 2 + 1:
+            return np.ones(count, dtype=bool)
+
+        keep = np.ones(count, dtype=bool)
+        floor = max(cfg.step_min_windows * 2, int(count * (1.0 - cfg.step_outlier_max_fraction)))
+
+        # One window is discarded per pass, then the neighbourhoods are measured
+        # again.  Removing every offender at once fails on the case that matters:
+        # a couple of bad lags sitting close together poison the median of the
+        # good windows next to them, which are then discarded as outliers in the
+        # same sweep — and those are exactly the windows nearest a step boundary,
+        # where the offset evidence is scarcest.
+        while int(np.count_nonzero(keep)) > floor:
+            deviations = self._neighbour_deviations(lags_ms, keep, span)
+            live = deviations[keep]
+            if live.size == 0:
+                break
+
+            scatter = float(np.median(live))
+            limit = max(cfg.step_min_ms, scatter * cfg.step_outlier_tolerance)
+
+            masked = np.where(keep, deviations, -np.inf)
+            worst = int(np.argmax(masked))
+            if masked[worst] <= limit:
+                break
+            keep[worst] = False
+
+        return keep
+
+    @staticmethod
+    def _neighbour_deviations(
+        lags_ms: np.ndarray,
+        keep: np.ndarray,
+        span: int,
+    ) -> np.ndarray:
+        """How far each window falls outside the range its neighbours span.
+
+        The two neighbour medians bracket what the offset is doing locally.  A
+        window anywhere inside that bracket is consistent with its surroundings
+        — including one sitting partway between two levels, which is exactly
+        what a window straddling an edit measures.  Only a value outside the
+        bracket is unexplained by anything nearby.
+
+        Measuring distance to the *nearer* median instead discarded those
+        straddling windows: on a 110-minute film with a 209 ms step, the two
+        windows closest to the cut were 57 ms from the nearer level, cleared the
+        threshold, and were dropped — taking the evidence for where the edit was
+        with them and pushing the detected boundary six minutes late.
+        """
+        indices = np.flatnonzero(keep)
+        deviations = np.zeros(lags_ms.size, dtype=np.float64)
+
+        for position, index in enumerate(indices):
+            bounds: list[float] = []
+            if position > 0:
+                back = lags_ms[indices[max(0, position - span):position]]
+                bounds.append(float(np.median(back)))
+            if position < indices.size - 1:
+                forward = lags_ms[indices[position + 1:position + 1 + span]]
+                bounds.append(float(np.median(forward)))
+            if not bounds:
+                continue
+
+            value = float(lags_ms[index])
+            low, high = min(bounds), max(bounds)
+            deviations[index] = max(0.0, low - value, value - high)
+
+        return deviations
+
+    def _steps_beat_a_straight_line(
+        self,
+        times: np.ndarray,
+        lags_ms: np.ndarray,
+        weights: np.ndarray,
+        cut_points: list[int],
+    ) -> bool:
+        """Decide between a staircase and a ramp.
+
+        Both models can fit a rising offset; only one of them is the right
+        explanation.  A dub whose clock runs fast produces a ramp and wants a
+        tempo correction, while a dub cut differently produces a staircase and
+        wants a splice.  Applying the wrong one is worse than doing nothing:
+        splicing a ramp chops continuous audio into steps that each drift, and
+        stretching a staircase smears a real edit across the whole film.
+
+        The comparison is on the same weighted L1 cost both models are fitted
+        under, so it asks the only question that matters — which shape explains
+        the measurements better.
+        """
+        fit = self._fit_drift_line(times, lags_ms, weights)
+        if fit is None:
+            return True
+
+        slope, intercept, _r_squared = fit
+        line_cost = float(np.sum(weights * np.abs(lags_ms - (slope * times + intercept))))
+
+        edges = [0, *cut_points, len(times)]
+        step_cost = sum(
+            self._l1_cost(lags_ms[lo:hi], weights[lo:hi])
+            for lo, hi in zip(edges, edges[1:])
+        )
+
+        # The line is free; the staircase costs a cut per boundary.  Demand a
+        # real margin so a marginally better fit does not justify the damage.
+        return step_cost < line_cost * self._config.step_vs_line_margin
+
+    def _binary_segment(
+        self,
+        times: np.ndarray,
+        lags_ms: np.ndarray,
+        weights: np.ndarray,
+        lo: int,
+        hi: int,
+        depth: int = 0,
+    ) -> list[int]:
+        """Recursively find split indices that genuinely reduce the L1 cost."""
+        cfg = self._config
+        if depth >= cfg.step_max_regions - 1:
+            return []
+
+        count = hi - lo
+        if count < cfg.step_min_windows * 2:
+            return []
+
+        base_cost = self._l1_cost(lags_ms[lo:hi], weights[lo:hi])
+        best_index: int | None = None
+        best_cost = base_cost
+        best_jump = 0.0
+
+        for split in range(lo + cfg.step_min_windows, hi - cfg.step_min_windows + 1):
+            left_span = times[split - 1] - times[lo]
+            right_span = times[hi - 1] - times[split]
+            if (
+                left_span < cfg.step_min_region_sec
+                or right_span < cfg.step_min_region_sec
+            ):
+                continue
+
+            left_centre = self._weighted_median(lags_ms[lo:split], weights[lo:split])
+            right_centre = self._weighted_median(lags_ms[split:hi], weights[split:hi])
+            jump = abs(right_centre - left_centre)
+            if jump < cfg.step_min_ms:
+                continue
+
+            # The jump has to stand out from the scatter the windows already
+            # show, not merely clear an absolute threshold.  Where the
+            # measurements bounce by hundreds of milliseconds on their own — a
+            # sparse or hard-to-correlate soundtrack — no boundary drawn through
+            # them means anything.
+            noise = self._pooled_deviation(
+                lags_ms[lo:split], left_centre, lags_ms[split:hi], right_centre
+            )
+            if jump < noise * cfg.step_min_snr:
+                continue
+
+            cost = self._l1_cost(lags_ms[lo:split], weights[lo:split]) + self._l1_cost(
+                lags_ms[split:hi], weights[split:hi]
+            )
+            if cost < best_cost:
+                best_cost = cost
+                best_index = split
+                best_jump = jump
+
+        if best_index is None:
+            return []
+
+        # Demand a real improvement, not a rounding-level one, so noise cannot
+        # accumulate splits.
+        if base_cost - best_cost < cfg.step_min_cost_gain * best_jump:
+            return []
+
+        return [
+            *self._binary_segment(times, lags_ms, weights, lo, best_index, depth + 1),
+            best_index,
+            *self._binary_segment(times, lags_ms, weights, best_index, hi, depth + 1),
+        ]
+
+    @staticmethod
+    def _pooled_deviation(
+        left: np.ndarray,
+        left_centre: float,
+        right: np.ndarray,
+        right_centre: float,
+    ) -> float:
+        """Median absolute deviation of both sides about their own centres."""
+        deviations = np.concatenate(
+            (np.abs(left - left_centre), np.abs(right - right_centre))
+        )
+        if deviations.size == 0:
+            return 0.0
+        return float(np.median(deviations))
+
+    @staticmethod
+    def _l1_cost(values: np.ndarray, weights: np.ndarray) -> float:
+        """Weighted absolute deviation from the weighted median."""
+        if values.size == 0:
+            return 0.0
+        centre = AudioAnalyzer._weighted_median(values, weights)
+        return float(np.sum(weights * np.abs(values - centre)))
+
+    @staticmethod
+    def _cap_segment_weights(weights: np.ndarray) -> np.ndarray:
+        """Bound how much any single window can outvote the rest.
+
+        ``score`` is a correlation peak divided by its noise floor, so it is a
+        signal-to-noise ratio and not a probability.  Two stretches of near
+        silence — end credits, a gap between reels — line up almost perfectly
+        and can score two orders of magnitude above windows carrying real
+        dialogue.  Used as a linear weight, one such window decides the delay
+        for an entire film: on a 138-minute test 23 windows agreed on -9490 ms
+        and were all discarded in favour of two outliers, one scoring 176.
+
+        Clipping at a multiple of the median keeps the useful ordering — a
+        window that correlates better still counts for more — while making it
+        impossible for a lone window to overrule a consistent majority.
+        """
+        if weights.size == 0:
+            return weights
+
+        median = float(np.median(weights))
+        if not np.isfinite(median) or median <= 0.0:
+            return weights
+
+        return np.minimum(weights, median * 4.0)
+
     def _filter_segment_results(
         self,
         segment_results: list[dict[str, float]],
@@ -1587,9 +2363,11 @@ class AudioAnalyzer:
             ],
             dtype=np.float64,
         )
-        weights = np.array(
-            [max(1.0, r["score"]) for r in segment_results],
-            dtype=np.float64,
+        weights = self._cap_segment_weights(
+            np.array(
+                [max(1.0, r["score"]) for r in segment_results],
+                dtype=np.float64,
+            )
         )
         dominant_center = self._find_dominant_cluster_center(
             residual_values,
@@ -1625,6 +2403,9 @@ class AudioAnalyzer:
         if values.size == 1:
             return float(values[0])
 
+        # Callers may pass raw correlation scores; cap here too so the kernel
+        # density below cannot be dominated by one window.
+        weights = AudioAnalyzer._cap_segment_weights(np.asarray(weights, dtype=np.float64))
         radius = max(2.0, fine_rate * 0.12)
         best_index = 0
         best_score = -1.0
@@ -1661,37 +2442,124 @@ class AudioAnalyzer:
             local_search_sec,
         )
 
+        drift_intercept_ms: float | None = None
+        drift_r2: float | None = None
+        drift_span_sec = 0.0
+
         if kept:
             kept_lags = np.array([r["lag"] for r in kept], dtype=np.float64)
-            kept_scores = np.array([max(1.0, r["score"]) for r in kept], dtype=np.float64)
+            kept_scores = self._cap_segment_weights(
+                np.array([max(1.0, r["score"]) for r in kept], dtype=np.float64)
+            )
             final_lag = self._weighted_median(kept_lags, kept_scores)
 
-            drift_ms_per_min: float | None = None
+            drift_ms_per_min = None
             if len(kept) >= 4:
                 t = np.array([r["center_sec"] for r in kept], dtype=np.float64)
                 y = np.array([r["lag"] / fine_rate * 1000.0 for r in kept], dtype=np.float64)
-                slope_ms_per_sec = float(np.polyfit(t, y, 1)[0])
-                drift_ms_per_min = slope_ms_per_sec * 60.0
+                fit = self._fit_drift_line(t, y, kept_scores)
+                if fit is not None:
+                    slope_ms_per_sec, intercept_ms, r_squared = fit
+                    drift_ms_per_min = slope_ms_per_sec * 60.0
+                    drift_intercept_ms = intercept_ms
+                    drift_r2 = r_squared
+                    drift_span_sec = float(t.max() - t.min())
 
             confidence = float(np.median([r["score"] for r in kept]))
             used_segments = len(kept)
+
+            # Spread of the kept windows about whatever lag this candidate
+            # predicted for them.  For an anchored candidate that is the fitted
+            # line, so a track with seconds of drift can still score tightly.
+            residuals = np.array(
+                [r.get("residual_lag", r["lag"]) for r in kept], dtype=np.float64
+            )
+            residual_mad_ms = float(
+                np.median(np.abs(residuals - np.median(residuals))) / fine_rate * 1000.0
+            )
         else:
             final_lag = coarse_lag_fine
             used_segments = 0
             confidence = coarse_score
             drift_ms_per_min = None
+            residual_mad_ms = 0.0
 
         final_ms = final_lag / fine_rate * 1000.0
+
+        # ``total_segments`` is the *requested* grid size, but the refinement
+        # pass adds anchor-centred windows on top of it, so the raw count could
+        # exceed the request and the UI reported nonsense like "63/12".
+        attempted_segments = max(int(total_segments), len(segment_results))
+
+        # Region detection runs on the *raw* windows, not the kept ones: the
+        # dominant-cluster filter above exists to reject noise around a single
+        # offset, so it would throw away the very windows that evidence a step.
+        offset_regions = self._detect_offset_regions(segment_results, fine_rate)
 
         return AnalysisResult(
             delay_ms=float(final_ms),
             coarse_ms=float(coarse_ms),
             confidence=float(confidence),
-            total_segments=int(total_segments),
+            total_segments=attempted_segments,
             used_segments=int(used_segments),
             drift_ms_per_min=drift_ms_per_min,
             skip_fallback=bool(skip_fallback),
+            drift_intercept_ms=drift_intercept_ms,
+            drift_r2=drift_r2,
+            drift_span_sec=drift_span_sec,
+            offset_regions=offset_regions,
+            residual_mad_ms=residual_mad_ms,
         )
+
+    @staticmethod
+    def _fit_drift_line(
+        t: np.ndarray,
+        y: np.ndarray,
+        weights: np.ndarray,
+    ) -> tuple[float, float, float] | None:
+        """Weighted least-squares fit of lag against time.
+
+        Returns ``(slope_ms_per_sec, intercept_ms, r_squared)``.  The intercept
+        matters as much as the slope: ``delay_ms`` is a median over segments and
+        therefore describes the middle of the content, so a tempo correction
+        anchored on it would be off by half the total drift.
+
+        ``r_squared`` is what separates a genuine clock difference from scatter
+        in the segment lags, and returning ``None`` for a degenerate fit keeps
+        callers from having to special-case NaNs.
+        """
+        if t.size < 4 or np.ptp(t) <= 1e-6:
+            return None
+
+        w = np.asarray(weights, dtype=np.float64)
+        if w.size != t.size or not np.all(np.isfinite(w)):
+            w = np.ones_like(t)
+        w = np.maximum(w, 1e-9)
+
+        try:
+            # ``polyfit`` scales the design rows by ``w``, so it minimises
+            # ``sum(w**2 * residual**2)``.  Feeding it ``sqrt(w)`` makes the
+            # objective ``sum(w * residual**2)``, which is what the R² below
+            # measures — otherwise the two disagree about what "fit" means.
+            slope, intercept = np.polyfit(t, y, 1, w=np.sqrt(w))
+        except (np.linalg.LinAlgError, ValueError):
+            return None
+        if not (np.isfinite(slope) and np.isfinite(intercept)):
+            return None
+
+        predicted = slope * t + intercept
+        weight_sum = float(np.sum(w))
+        mean_y = float(np.sum(w * y) / weight_sum)
+        ss_res = float(np.sum(w * (y - predicted) ** 2))
+        ss_tot = float(np.sum(w * (y - mean_y) ** 2))
+        if ss_tot <= 1e-12:
+            # A perfectly flat lag series has no drift to explain; report a
+            # clean zero-slope fit rather than dividing by ~0.
+            r_squared = 1.0 if ss_res <= 1e-12 else 0.0
+        else:
+            r_squared = max(0.0, min(1.0, 1.0 - (ss_res / ss_tot)))
+
+        return float(slope), float(intercept), float(r_squared)
 
     @staticmethod
     def _weighted_median(values: np.ndarray, weights: np.ndarray) -> float:
