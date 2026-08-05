@@ -5,7 +5,7 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square)](https://github.com/blast1see/AudioSyncTool)
-[![Release](https://img.shields.io/badge/Release-v2.3.0-orange?style=flat-square)](https://github.com/blast1see/AudioSyncTool/releases)
+[![Release](https://img.shields.io/badge/Release-v2.4.0-orange?style=flat-square)](https://github.com/blast1see/AudioSyncTool/releases)
 
 **A robust audio delay detection and synchronization tool with a modern dark-themed GUI.**
 
@@ -27,14 +27,22 @@
 
 **Audio Sync Tool** is a robust audio delay detection and synchronization tool with a modern dark-themed GUI. It analyzes two audio files, detects the time offset between them using cross-correlation, and produces a perfectly synchronized output. Whether you're dealing with out-of-sync dubs, misaligned audio tracks, or FPS-converted content, Audio Sync Tool handles it all with precision.
 
-### Screenshots
+### Screenshot
 
-<img width="802" height="1392" alt="2026-04-02 19_26_56-Audio Sync Tool" src="https://github.com/user-attachments/assets/89009109-7947-4d85-b0f7-8fa21c4a64f7" />
+<img alt="Audio Sync Tool" src="docs/screenshot-en.png" width="820" />
 
 ### Key Features
 
+The three corrections below exist because a single constant delay is not enough
+for real material. Each is applied only when the measurement supports it, and
+the log says which one ran.
+
 - **Cross-correlation based delay detection** — robust & accurate offset calculation
-- **6 synchronization modes** — adelay/atrim, aresample, atempo, rubberband, delay/trim, async resample
+- **Progressive drift correction** — cancels the clock difference between two sources, so a two-hour file stays in sync at the end as well as the start
+- **Piecewise correction for different edits** — when the offset jumps partway through (an ad break, a reel change), the track is split at the edit and each region gets its own delay
+- **Frame-rate mismatch detection** — recognises a dub mastered at the wrong rate, then converts and re-analyzes on its own
+- **Honest confidence** — when the measured windows disagree with each other, it says so instead of handing you a file that only looks right
+- **3 synchronization modes** — precise offset, timestamp repair, Rubber Band stretch
 - **MKV/MP4 container support** — auto-detect and extract audio streams
 - **Drag & drop file support** — seamless file loading with tkinterdnd2
 - **AC3 and EAC3 encoding** — via FFmpeg or [deew](https://github.com/pcroland/deew)
@@ -42,9 +50,8 @@
 - **FLAC & Opus encoding** — via FFmpeg
 - **FPS conversion** — 23.976 <-> 24 <-> 25
 - **Bilingual UI** — English / Turkish
-- **Dark-themed modern interface** — easy on the eyes
-- **Preserves original audio quality** — bit depth, sample rate, channels
-- **Tool Paths** — optional custom paths for ffmpeg, ffprobe, qaac, deew (falls back to system PATH)
+- **Dark-themed modern interface** — fits a 1080p screen without scrolling
+- **Preserves original audio quality** — bit depth, sample rate, channel order
 
 ### System Requirements
 
@@ -143,12 +150,112 @@ checks Python 3.10, 3.12, and 3.14 and builds the Windows executable with PyInst
 
 | Mode | Description |
 |---|---|
-| **adelay / atrim** | Applies delay or trim to the target audio only. Best general-purpose mode. |
-| **aresample** | Resamples audio to adjust timing. Good for minor drift corrections. |
-| **atempo (exact offset)** | Compatibility mode that applies an exact delay or trim; it does not spread a fixed offset into a tempo change. |
-| **rubberband** | High-quality time-stretching using the Rubber Band library. Best for quality-sensitive work. |
-| **delay / trim (simple)** | Applies straightforward delay or trim to the target audio. Simple and effective. |
-| **async resample (1000)** | Uses aggressive async resampling for difficult timing mismatches. |
+| **Precise offset** (default) | Sample-accurate `adelay` / `atrim` on the target track. Correct for almost every job — leave it alone unless one of the cases below applies. |
+| **Repair timestamps** | Appends `aresample=async=1`. Only useful when the input's own timestamps are broken (stream captures, VFR remuxes); on a well-formed file it changes nothing. |
+| **Rubber Band stretch** | Performs drift correction with librubberband instead of `atempo`. Engages only when a drift is actually being corrected, and needs FFmpeg built with `--enable-librubberband`. |
+
+> **Changed in v2.4.** v2.3 offered six modes, but five of them produced
+> byte-identical output — the extra filters were either absent or no-ops such as
+> `rubberband=tempo=1.0`, which re-encoded the audio for no benefit. The list is
+> now the three that genuinely behave differently. Code that names a retired
+> mode (`ATEMPO`, `APAD`, `ASYNCTS`) keeps working: pass the name through
+> `audio_sync.config.sync_mode_from_name()`, which maps each to the surviving
+> mode that reproduces its old behaviour.
+
+### Drift Correction
+
+Two encodes of the same soundtrack often run at slightly different clock rates.
+A constant delay cannot fix that: correcting the middle of the file leaves both
+ends out of sync, and the error grows with runtime.
+
+Audio Sync Tool fits a line through the per-window offsets it measures, and when
+the slope is both large enough to matter and well supported by the data, it
+retimes the target track to cancel it. On a five-minute test with 0.1 % drift
+(~60 ms/min) this took the residual error from **228 ms of swing down to 7 ms**.
+
+The correction is skipped — and the log says so — when the fit is weak (R² below
+0.80), when fewer than six windows validated, when they span under a minute, or
+when the slope is below 1 ms/min. In those cases only the constant offset is
+applied, exactly as before. Turn the whole behaviour off with **Correct
+progressive drift automatically** in Detection Settings.
+
+### Offset Jumps (Different Edits)
+
+Drift is a gradual slope; a *jump* is different. Broadcast and streaming dubs are
+frequently cut differently from the disc — an ad break trimmed out, a reel change,
+an alternate edit — which moves the offset by a fixed amount partway through and
+leaves it there. Neither a constant delay nor a straight line can express that.
+
+Audio Sync Tool models the offset piecewise. It looks for genuine steps in the
+measured windows, then pins each boundary down by asking the audio directly:
+given the two candidate offsets, whichever one aligns the tracks better at a
+given moment says which side of the edit that moment is on, and bisecting on
+that finds the cut within a few seconds. The track is then split at those points
+and each region is aligned on its own delay, with a short fade across every join.
+
+Measured on real material — a Turkish dub against the BluRay remux — this took a
+two-hour film from **660 ms of error at worst down to 63 ms**, with the windows
+exceeding 45 ms falling from 20 of 27 to 1 of 28.
+
+Splicing only happens when the evidence supports it. The steps must clear 40 ms,
+hold for at least two minutes on both sides, be backed by at least four
+convincing windows each, stand at least 4x above the scatter the windows already
+show, and explain the data clearly better than a straight line does — that last
+test is what keeps a smooth drift from being chopped into a staircase. Turn it
+off with **Correct offset jumps from different edits**.
+
+> **Known limitation.** Drift and jumps are treated as alternatives, not as
+> things that can coexist: whichever model explains the measurements better is
+> the one applied. A track that both steps *and* drifts will have only the
+> dominant effect corrected. None of the material tested so far does both, but
+> if the log reports regions and the result still slides within one of them,
+> that is the case you are looking at.
+
+### Frame-Rate Mismatches
+
+A dub mastered against a different frame rate plays at the wrong speed: 24 vs
+23.976 drifts about 60 ms per minute, PAL against film speed about 2.5 seconds
+per minute. Correcting that after the fact is possible but second-best, because
+by the end of a feature the two tracks can be seconds apart — further than the
+analysis window can follow, which is exactly when the measurement itself starts
+to fail.
+
+So the tool tests for it directly. The coarse feature stream is resampled by each
+standard ratio and scored; if one explains the pair better than no conversion,
+that ratio is named in the log. Across eight real film pairs it identified the
+two that were mismatched and stayed silent on the other six.
+
+You do not have to act on it yourself. When a mismatch is found, the tool
+converts and re-analyzes on its own, then keeps that result only if the
+validated windows agree more closely than they did without it — so a wrong guess
+cannot make a correct pair worse, and the second pass only runs when something
+was actually detected.
+
+On the 132-minute pair above, that took the default-settings result from **4.0
+seconds of error down to 352 ms**, with the windows exceeding 45 ms falling from
+11 of 11 to 4 of 12 — with nothing asked of the user. Uncheck **Detect and
+correct a frame-rate mismatch automatically** in the FPS panel to go back to
+being told rather than helped.
+
+### When The Result Cannot Be Trusted
+
+A high confidence score means each window matched something convincingly. It
+says nothing about whether the windows agree with *each other* — and that is
+what decides whether one delay can hold across a whole film.
+
+Audio Sync Tool now measures that disagreement and says so. When the validated
+windows scatter by more than 100 ms, the log warns and the readout is marked
+weak regardless of the score, because the reported delay is then only right for
+whichever stretch of the film dominated the vote.
+
+This happens when the two sources are not really the same edit, or when they
+drift apart by more than the search can follow. Tested against a 132-minute
+cross-language pair whose offset slid from +40.3 s to +32.5 s across the film,
+the windows disagreed by 200 ms and the output was seconds out at the ends —
+the tool will tell you that rather than hand you a file that looks fine.
+
+If you hit this, the usual fixes are to confirm both tracks are the same cut,
+or to sync the halves separately.
 
 ### Deew Encoding
 
@@ -165,6 +272,28 @@ Audio Sync Tool integrates with **[deew](https://github.com/pcroland/deew)** to 
 3. The final output is a properly encoded AC3 or EAC3 file
 
 > **Important:** Please refer to the [deew documentation](https://github.com/pcroland/deew) for setup instructions.
+
+> **If deew exits immediately on Windows,** check `logo` in its config. deew
+> draws a start-up banner through `rich`, and on any locale whose code page
+> cannot represent the block characters it uses — Turkish cp1254, Greek cp1253
+> and others — that banner raises `UnicodeEncodeError` and deew dies before
+> touching the audio. Setting `logo = 0` in `%LOCALAPPDATA%\deew\config.toml`
+> fixes it, and costs nothing: the banner is decorative, and Audio Sync Tool
+> captures deew's output anyway so you never see it. Audio Sync Tool recognises
+> this crash and tells you the same thing rather than showing a traceback.
+
+### Temporary Files
+
+Every run writes intermediates the size of the film's audio — decoded PCM for the
+analysis, a synchronized WAV, an FPS-converted WAV, deew's scratch directory. All
+of it lives in a temporary folder beside the output and is removed when the run
+ends, whether it succeeded, failed or was cancelled.
+
+The one deliberate exception is a failure during the final *encoding* step. The
+synchronization has already succeeded by then, so the synchronized WAV is kept
+rather than making you analyze the film again. That file is uncompressed and as
+long as the movie — several GB for a feature — so the error message tells you
+where it is and how big it is. Delete it once you have what you need.
 
 ### FPS Conversion
 
@@ -271,12 +400,20 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed list of changes in each version.
 
 ### Ekran Görüntüsü
 
-<img width="802" height="1392" alt="2026-04-02 19_27_06-Audio Sync Tool-TR" src="https://github.com/user-attachments/assets/106d8021-baec-4f75-9e2a-2f46f347c6be" />
+<img alt="Audio Sync Tool" src="docs/screenshot-tr.png" width="820" />
 
 ### Temel Özellikler
 
+Aşağıdaki üç düzeltme, gerçek malzemede tek bir sabit gecikmenin yetmemesi
+yüzünden var. Her biri yalnızca ölçüm destekliyorsa uygulanır ve hangisinin
+çalıştığı loga yazılır.
+
 - **Çapraz korelasyon tabanlı gecikme tespiti** — sağlam ve doğru ofset hesaplama
-- **6 senkronizasyon modu** — adelay/atrim, aresample, atempo, rubberband, delay/trim, async resample
+- **İlerleyen kayma (drift) düzeltmesi** — iki kaynak arasındaki saat farkını giderir; iki saatlik bir dosya sonunda da başındaki kadar senkron kalır
+- **Farklı kurgular için parçalı düzeltme** — ofset filmin ortasında sıçrıyorsa (reklam arası, makara değişimi) parça kesme noktasından bölünür ve her bölge kendi gecikmesini alır
+- **Kare hızı uyuşmazlığı tespiti** — yanlış hızda hazırlanmış bir dublajı tanır, kendisi dönüştürüp yeniden analiz eder
+- **Dürüst güven bildirimi** — ölçülen pencereler birbiriyle uyuşmuyorsa bunu söyler; yalnızca düzgün görünen bir dosya vermez
+- **3 senkronizasyon modu** — kesin ofset, zaman damgası onarımı, Rubber Band germe
 - **MKV/MP4 konteyner desteği** — otomatik algılama ve ses akışı çıkarma
 - **Sürükle & bırak dosya desteği** — tkinterdnd2 ile sorunsuz dosya yükleme
 - **AC3 ve EAC3 kodlama** — FFmpeg veya [deew](https://github.com/pcroland/deew) aracılığıyla
@@ -385,12 +522,113 @@ ayrıca Python 3.10, 3.12 ve 3.14'ü kontrol eder ve PyInstaller ile Windows EXE
 
 | Mod | Açıklama |
 |---|---|
-| **adelay / atrim** | Yalnızca hedef sese gecikme veya kırpma uygular. En iyi genel amaçlı mod. |
-| **aresample** | Zamanlamayı ayarlamak için sesi yeniden örnekler. Küçük kayma düzeltmeleri için uygundur. |
-| **atempo (exact offset)** | Geriye uyumlu mod; sabit ofseti tempo değişikliğine yaymadan kesin gecikme veya kırpma uygular. |
-| **rubberband** | Rubber Band kütüphanesi ile yüksek kaliteli zaman uzatma. Kalite hassasiyeti gerektiren işler için en iyisi. |
-| **delay / trim (simple)** | Hedef sese doğrudan gecikme veya kırpma uygular. Basit ve etkilidir. |
-| **async resample (1000)** | Zor zamanlama uyuşmazlıkları için agresif async resample kullanır. |
+| **Kesin ofset** (varsayılan) | Hedef parçaya örnek hassasiyetinde `adelay` / `atrim` uygular. Neredeyse her iş için doğru seçim — aşağıdaki özel durumlar yoksa değiştirmeyin. |
+| **Zaman damgası onarımı** | Sona `aresample=async=1` ekler. Yalnızca girdinin kendi zaman damgaları bozuksa (yayın kaydı, VFR remux) işe yarar; düzgün bir dosyada hiçbir şeyi değiştirmez. |
+| **Rubber Band germe** | Drift düzeltmesini `atempo` yerine librubberband ile yapar. Yalnızca gerçekten bir drift düzeltilirken devreye girer ve FFmpeg'in `--enable-librubberband` ile derlenmiş olmasını gerektirir. |
+
+> **v2.4'te değişti.** v2.3'te altı mod vardı ama beşi bayt bayt aynı çıktıyı
+> üretiyordu: ek filtreler ya hiç eklenmiyor ya da `rubberband=tempo=1.0` gibi
+> sesi boş yere yeniden kodlayan işlevsiz aşamalardı. Liste artık gerçekten
+> farklı davranan üç moddan oluşuyor. Emekliye ayrılan adları (`ATEMPO`,
+> `APAD`, `ASYNCTS`) kullanan kodlar çalışmaya devam eder: adı
+> `audio_sync.config.sync_mode_from_name()` üzerinden geçirin, her biri eski
+> davranışını yeniden üreten moda eşlenir.
+
+### Drift Düzeltmesi
+
+Aynı ses bandının iki farklı kodlaması çoğu zaman birbirinden hafifçe farklı
+saat hızlarıyla ilerler. Sabit bir gecikme bunu düzeltemez: dosyanın ortasını
+hizalayınca iki uç kayar ve hata süre uzadıkça büyür.
+
+Audio Sync Tool ölçtüğü pencere ofsetlerine bir doğru uydurur; eğim hem anlamlı
+büyüklükte hem de verice yeterince desteklenirse hedef parçayı yeniden
+zamanlayarak bunu giderir. %0,1 drift içeren (yaklaşık 60 ms/dk) beş dakikalık
+bir testte kalıntı hata **228 ms salınımdan 7 ms'ye** düştü.
+
+Uyum zayıfsa (R² 0,80 altında), altıdan az pencere doğrulanmışsa, pencereler bir
+dakikadan kısa bir aralığa yayılmışsa ya da eğim 1 ms/dk altındaysa düzeltme
+uygulanmaz ve bu durum loga yazılır. O hâlde eskisi gibi yalnızca sabit ofset
+uygulanır. Davranışı tümüyle kapatmak için Tespit Ayarları'ndaki **Zaman
+kaymasını (drift) otomatik düzelt** kutusunu kaldırın.
+
+### Ofset Sıçramaları (Farklı Kurgular)
+
+Drift kademeli bir eğimdir; *sıçrama* ise başka bir şeydir. Yayın ve dijital
+platform dublajları çoğu zaman diskten farklı kurgulanır — çıkarılmış bir reklam
+arası, makara değişimi, alternatif bir kurgu — ve bu, ofseti filmin ortasında
+sabit bir miktar kaydırıp orada bırakır. Ne sabit gecikme ne de doğru bunu
+ifade edebilir.
+
+Audio Sync Tool ofseti parça parça modeller. Önce ölçülen pencerelerde gerçek
+basamakları arar, sonra her sınırı doğrudan sese sorarak yerine oturtur: iki aday
+ofsetten hangisi belirli bir anda parçaları daha iyi hizalıyorsa, o an kesmenin
+hangi tarafında olduğumuzu söyler; bu ölçüt üzerinde ikili arama kesmeyi birkaç
+saniye içinde bulur. Parça bu noktalardan bölünür, her bölge kendi gecikmesiyle
+hizalanır ve her ek yerine kısa bir sönümleme uygulanır.
+
+Gerçek malzemede ölçüldü — BluRay remux'a karşı bir Türkçe dublaj: iki saatlik
+bir filmde en kötü hata **660 ms'den 63 ms'ye** düştü, 45 ms'yi aşan pencere
+sayısı 27'de 20'den 28'de 1'e indi.
+
+Kesme yalnızca kanıt destekliyorsa yapılır. Basamak 40 ms'yi aşmalı, iki tarafta
+da en az iki dakika sürmeli, her biri en az dört ikna edici pencereyle
+desteklenmeli, pencerelerin kendi saçılmasının en az 4 katı olmalı ve veriyi bir
+doğrudan belirgin biçimde daha iyi açıklamalıdır — bu son sınama, düzgün bir
+driftin merdivene doğranmasını engelleyen şeydir. Kapatmak için **Kurgu
+farkından doğan ofset sıçramalarını düzelt** kutusunu kaldırın.
+
+> **Bilinen sınır.** Drift ve sıçrama birlikte var olabilen şeyler olarak değil,
+> alternatif olarak ele alınır: ölçümleri hangisi daha iyi açıklıyorsa o
+> uygulanır. Hem basamaklanan hem de kayan bir parçada yalnızca baskın etki
+> düzeltilir. Şimdiye kadar denenen malzemelerin hiçbirinde ikisi bir arada
+> görülmedi; ancak log bölgeleri bildiriyor ve sonuç bir bölgenin içinde hâlâ
+> kayıyorsa karşılaştığınız durum budur.
+
+### Kare Hızı Uyuşmazlıkları
+
+Farklı bir kare hızına göre hazırlanmış bir dublaj yanlış hızda çalar: 24'e
+karşı 23.976 dakikada yaklaşık 60 ms, PAL'e karşı film hızı ise dakikada
+yaklaşık 2,5 saniye kayar. Bunu sonradan düzeltmek mümkündür ama ikinci en iyi
+çözümdür; çünkü bir uzun metrajın sonunda iki parça saniyelerce ayrışmış olur —
+analiz penceresinin izleyebileceğinden daha fazla, ki ölçümün kendisi de tam
+bu noktada bozulmaya başlar.
+
+Bu yüzden araç doğrudan sınıyor. Kaba öznitelik akışı standart oranların her
+biriyle yeniden örneklenip skorlanıyor; biri dönüşümsüz duruma göre çifti daha
+iyi açıklıyorsa o oran loga yazılıyor. Sekiz gerçek film çiftinde uyuşmazlığı
+olan ikisini buldu, diğer altısında sessiz kaldı.
+
+Bunu elle yapmanız gerekmiyor. Bir uyuşmazlık bulunduğunda araç kendisi
+dönüştürüp yeniden analiz eder ve sonucu yalnızca doğrulanan pencereler
+öncekinden daha uyumlu çıkarsa saklar — yani yanlış bir tahmin, doğru bir çifti
+bozamaz; ikinci geçiş de yalnızca gerçekten bir şey tespit edildiğinde çalışır.
+
+Yukarıdaki 132 dakikalık çiftte bu, varsayılan ayarlarla alınan sonucu **4,0
+saniyelik hatadan 352 ms'ye** indirdi; 45 ms'yi aşan pencere sayısı 11'de 11'den
+12'de 4'e düştü — kullanıcıdan hiçbir şey istenmeden. Yardım almak yerine
+yalnızca bilgilendirilmek isterseniz FPS panelindeki **Kare hızı uyuşmazlığını
+kendiliğinden bul ve düzelt** kutusunu kaldırın.
+
+### Sonuca Ne Zaman Güvenilmez
+
+Yüksek bir güven skoru, her pencerenin bir şeye ikna edici biçimde eşleştiğini
+söyler. Pencerelerin *birbiriyle* uyuşup uyuşmadığı hakkında hiçbir şey
+söylemez — oysa tek bir gecikmenin tüm filmde geçerli olup olmayacağını
+belirleyen budur.
+
+Audio Sync Tool artık bu uyuşmazlığı ölçüyor ve bildiriyor. Doğrulanan
+pencereler 100 ms'den fazla ayrışıyorsa log uyarır ve skor ne olursa olsun
+okuma "zayıf" olarak işaretlenir; çünkü bildirilen gecikme yalnızca oylamada
+baskın çıkan bölüm için doğrudur.
+
+Bu, iki kaynak aslında aynı kurgu olmadığında ya da aramanın izleyebileceğinden
+daha fazla birbirinden uzaklaştığında olur. Ofseti film boyunca +40,3 s'den
++32,5 s'ye kayan 132 dakikalık iki dilli bir çiftte pencereler 200 ms ayrıştı ve
+çıktı uçlarda saniyelerce kaymıştı — araç size düzgün görünen bir dosya vermek
+yerine bunu söyleyecek.
+
+Bununla karşılaşırsanız olağan çözüm, iki parçanın aynı kurgu olduğunu
+doğrulamak veya yarımları ayrı ayrı senkronlamaktır.
 
 ### Deew Kodlama
 
@@ -407,6 +645,28 @@ Audio Sync Tool, AC3 ve EAC3 kodlama yetenekleri sağlamak için **[deew](https:
 3. Son çıktı, düzgün şekilde kodlanmış bir AC3 veya EAC3 dosyasıdır
 
 > **Önemli:** Kurulum talimatları için lütfen [deew dokümantasyonuna](https://github.com/pcroland/deew) başvurun.
+
+> **deew Windows'ta hemen çıkıyorsa,** yapılandırmasındaki `logo` ayarına bakın.
+> deew açılışta `rich` ile bir başlık çiziyor; bu başlığın kullandığı blok
+> karakterleri temsil edemeyen kod sayfalarında — Türkçe cp1254, Yunanca cp1253
+> ve diğerleri — `UnicodeEncodeError` fırlatıyor ve deew sese hiç dokunmadan
+> ölüyor. `%LOCALAPPDATA%\deew\config.toml` içinde `logo = 0` yapmak sorunu
+> çözer ve hiçbir şeye mal olmaz: başlık yalnızca süstür, üstelik Audio Sync
+> Tool deew'in çıktısını yakaladığı için onu zaten görmezsiniz. Audio Sync Tool
+> bu çökmeyi tanır ve traceback göstermek yerine aynı şeyi söyler.
+
+### Geçici Dosyalar
+
+Her çalıştırma, filmin sesi boyutunda ara dosyalar yazar — analiz için çözülmüş
+PCM, senkronize edilmiş WAV, FPS dönüştürülmüş WAV, deew'in geçici dizini.
+Bunların tamamı çıktının yanındaki geçici bir klasörde durur ve çalışma
+bittiğinde — başarılı olsun, başarısız olsun, iptal edilsin — silinir.
+
+Tek bilinçli istisna, son *kodlama* adımındaki bir hatadır. O noktada
+senkronizasyon zaten başarılı olmuştur; bu yüzden filmi baştan analiz etmek
+zorunda kalmayasınız diye senkronize WAV saklanır. Bu dosya sıkıştırılmamıştır
+ve film uzunluğundadır — uzun metrajda birkaç GB — bu nedenle hata mesajı hem
+nerede olduğunu hem de boyutunu söyler. İhtiyacınız kalmayınca silin.
 
 ### FPS Dönüşümü
 

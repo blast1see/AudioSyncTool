@@ -203,6 +203,73 @@ def resolve_deew_backend() -> DeewBackend:
     )
 
 
+def deew_config_locations() -> tuple[str, ...]:
+    """Where deew looks for ``config.toml``, most specific first.
+
+    Reported back to the user when a setting in that file has to change; a
+    message telling someone to edit a file they then have to hunt for is only
+    half an answer.
+    """
+    candidates: list[str] = []
+
+    try:
+        executable = _find_deew_executable()
+    except Exception:  # pragma: no cover - defensive
+        executable = None
+    if executable:
+        candidates.append(os.path.join(os.path.dirname(executable), "config.toml"))
+
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA")
+        if base:
+            candidates.append(os.path.join(base, "deew", "config.toml"))
+    else:
+        candidates.append(
+            os.path.join(
+                os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+                "deew",
+                "config.toml",
+            )
+        )
+
+    return tuple(dict.fromkeys(candidates))
+
+
+def describe_deew_failure(output: str) -> str | None:
+    """Turn a known deew crash into something the user can act on.
+
+    deew draws an ASCII-art logo through ``rich`` before it encodes anything.
+    On Windows the child process inherits the system's legacy code page, and on
+    any locale whose code page cannot represent the logo's block characters —
+    Turkish cp1254, Greek cp1253, and others — ``rich`` raises
+    ``UnicodeEncodeError`` and deew dies before touching the audio.
+
+    Nothing outside deew can prevent this: the logo is a config setting, and
+    neither ``PYTHONIOENCODING``, ``PYTHONUTF8``, ``TERM`` nor ``chcp 65001``
+    changes the encoding ``rich`` picks (all verified against deew 3.2.2).  So
+    the honest response is to stop showing a Python traceback and name the one
+    line that fixes it.
+    """
+    if not output:
+        return None
+
+    lowered = output.lower()
+    if "unicodeencodeerror" not in lowered or "codec can't encode" not in lowered:
+        return None
+
+    locations = deew_config_locations()
+    where = "\n".join(f"  {path}" for path in locations) or "  (config not found)"
+    return (
+        "Deew crashed while drawing its start-up logo: this system's code page "
+        "cannot represent the characters it uses, so deew exits before encoding "
+        "anything.\n"
+        "Fix it by setting the logo off in deew's config:\n"
+        f"{where}\n"
+        "Change the line 'logo = 1' to 'logo = 0', then run the sync again.\n"
+        "The synchronized WAV has been kept, so nothing needs re-analyzing."
+    )
+
+
 def reset_deew_probe_cache() -> None:
     """Forget cached runtime probes after the configured deew path changes."""
     _probe_backend_runtime.cache_clear()
@@ -324,6 +391,9 @@ class DeewEncoder:
         # Parametreleri belirle (argüman > config > varsayılan)
         effective_fmt = fmt or self._config.format
         effective_downmix = downmix if downmix is not None else self._config.downmix
+        effective_downmix = self._usable_downmix(
+            effective_downmix, input_wav, progress_callback
+        )
         effective_drc = drc or self._config.drc
         effective_dialnorm = dialnorm if dialnorm is not None else self._config.dialnorm
 
@@ -382,6 +452,11 @@ class DeewEncoder:
             stderr_msg = result.stderr[-600:] if result.stderr else "(stderr empty)"
             stdout_msg = result.stdout[-600:] if result.stdout else ""
             error_detail = stderr_msg or stdout_msg
+
+            hint = describe_deew_failure(result.stderr or result.stdout or "")
+            if hint:
+                raise RuntimeError(hint)
+
             raise RuntimeError(
                 f"Deew encoding error (code: {result.returncode}):\n{error_detail}"
             )
@@ -400,6 +475,43 @@ class DeewEncoder:
         return output_path
 
     # ── Komut Oluşturma ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _usable_downmix(
+        downmix: DeewDownmix | None,
+        input_wav: str,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> DeewDownmix | None:
+        """Drop a downmix that deew would reject.
+
+        deew refuses ``-dm`` unless the target is *fewer* channels than the
+        input — asking a stereo track for a stereo downmix aborts the encode
+        with "downmix value has to be lower than the number of input channels".
+        Choosing "Stereo" for a stereo source is a reasonable thing for someone
+        to do, and it means "leave it alone", so the flag is simply omitted
+        rather than failing the run after the synchronization already succeeded.
+        """
+        if downmix is None:
+            return None
+
+        # Imported here rather than at module scope: ffmpeg_wrapper pulls in
+        # numpy, and this module is imported during UI start-up.
+        from audio_sync.core.ffmpeg_wrapper import FFmpegWrapper
+
+        try:
+            info = FFmpegWrapper().probe_audio(input_wav)
+        except Exception:  # pragma: no cover - probe failures handled downstream
+            return downmix
+
+        if downmix.channels < info.channels:
+            return downmix
+
+        if progress_callback:
+            progress_callback(
+                f"Ignoring the {downmix.display_name} downmix: the track already "
+                f"has {info.channels} channel(s), so there is nothing to fold down."
+            )
+        return None
 
     @staticmethod
     def _build_command(

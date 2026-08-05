@@ -109,9 +109,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
     ) -> None:
         super().__init__()
         self.title("Audio Sync Tool")
-        self.geometry("800x800")
         self.resizable(True, True)
-        self.minsize(700, 700)
+        self.minsize(900, 560)
         self.configure(bg=THEME.bg)
 
         # i18n
@@ -144,12 +143,15 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self.skip_intro_var = tk.StringVar(value="120")
         self.segment_count_var = tk.StringVar(value="12")
         self.force_48k_var = tk.BooleanVar(value=False)
+        self.correct_drift_var = tk.BooleanVar(value=True)
+        self.correct_steps_var = tk.BooleanVar(value=True)
 
         # Senkronizasyon modu
         self.sync_mode_var = tk.StringVar(value=SyncMode.ADELAY_AMIX.display_name)
 
         # FPS dönüşüm ayarları
         self.fps_enabled_var = tk.BooleanVar(value=False)
+        self.fps_auto_var = tk.BooleanVar(value=True)
         self.fps_conversion_var = tk.StringVar(value=FpsConversion.FPS_25_TO_23976.display_name)
 
         # Deew encoding ayarları
@@ -190,19 +192,40 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
     # ── UI Oluşturma ─────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
-        """Ana arayüzü oluşturur — alt metotlara delege eder."""
-        # Alt çubuk (ilerleme + buton) her zaman görünür — kaydırma alanının dışında
+        """Ana arayüzü oluşturur — alt metotlara delege eder.
+
+        Paneller tek bir sütun yerine iki sütuna yerleştirilir.  v2.3'te
+        yığılmış düzen 1262 piksel yüksekliğe ulaşıyordu; 1080p bir ekranda
+        pencere hiçbir zaman tamamını gösteremiyor, kullanıcı "Senkronizasyonu
+        Başlat" düğmesini görmek için kaydırmak zorunda kalıyordu.
+        """
+        # Alt çubuk (ilerleme + butonlar) her zaman görünür — kaydırma alanının dışında
         self._build_bottom_bar()
         # Kaydırılabilir içerik alanı
         self._build_scrollable_container()
         self._build_header()
-        self._build_drop_zones()
-        self._build_options_panel()
-        self._build_sync_mode_panel()
-        self._build_fps_panel()
-        self._build_encoding_panel()
-        self._build_info_panel()
-        self._build_log_panel()
+
+        body = tk.Frame(self._content, bg=THEME.bg)
+        body.pack(fill="both", expand=True, padx=16, pady=(0, 10))
+        body.columnconfigure(0, weight=1, uniform="cols")
+        body.columnconfigure(1, weight=1, uniform="cols")
+
+        # Sol sütun: girdi ve sonuç — kullanıcının okuduğu şeyler.
+        left = tk.Frame(body, bg=THEME.bg)
+        left.grid(row=0, column=0, sticky="new", padx=(0, 6))
+        # Sağ sütun: ayarlar — kullanıcının değiştirdiği şeyler.
+        right = tk.Frame(body, bg=THEME.bg)
+        right.grid(row=0, column=1, sticky="new", padx=(6, 0))
+
+        self._build_drop_zones(left)
+        self._build_info_panel(left)
+        self._build_log_panel(left)
+
+        self._build_options_panel(right)
+        self._build_sync_mode_panel(right)
+        self._build_fps_panel(right)
+        self._build_encoding_panel(right)
+
         self.schedule_later(50, self._fit_to_content)
 
     def _build_scrollable_container(self) -> None:
@@ -210,11 +233,13 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._canvas = tk.Canvas(
             self, bg=THEME.bg, highlightthickness=0, bd=0,
         )
+        # The v2.3 scrollbar was #2a2a3a on a #0f0f13 trough — invisible in
+        # practice, so 674 px of hidden content gave no visual cue at all.
         self._scrollbar = tk.Scrollbar(
             self, orient="vertical", command=self._canvas.yview,
-            bg=THEME.border, troughcolor=THEME.bg,
-            activebackground=THEME.muted, highlightthickness=0,
-            bd=0, width=10,
+            bg=THEME.muted, troughcolor=THEME.card,
+            activebackground=THEME.accent, highlightthickness=0,
+            bd=0, width=11,
         )
         self._canvas.configure(yscrollcommand=self._scrollbar.set)
 
@@ -280,17 +305,29 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
     def _build_header(self) -> None:
         """Başlık bölümünü oluşturur — dil seçimi dahil."""
         hdr = tk.Frame(self._content, bg=THEME.bg)
-        hdr.pack(fill="x", padx=30, pady=(28, 6))
+        hdr.pack(fill="x", padx=16, pady=(14, 4))
 
-        # Sol: Başlık
+        # Sol: Başlık ve alt başlık aynı blokta — alt başlık v2.3'te ortalanmış
+        # ayrı bir satırdı ve hiçbir şeyle hizalanmıyordu.
         title_frame = tk.Frame(hdr, bg=THEME.bg)
         title_frame.pack(side="left")
+        wordmark = tk.Frame(title_frame, bg=THEME.bg)
+        wordmark.pack(anchor="w")
         tk.Label(
-            title_frame, text="AUDIO", font=FONTS.header, fg=THEME.accent, bg=THEME.bg,
+            wordmark, text="AUDIO", font=FONTS.header, fg=THEME.accent, bg=THEME.bg,
         ).pack(side="left")
         tk.Label(
-            title_frame, text="SYNC", font=FONTS.header, fg=THEME.accent2, bg=THEME.bg,
+            wordmark, text="SYNC", font=FONTS.header, fg=THEME.accent2, bg=THEME.bg,
         ).pack(side="left")
+        self._subtitle_lbl = tk.Label(
+            title_frame,
+            text=t("app_subtitle"),
+            font=FONTS.small,
+            fg=THEME.muted,
+            bg=THEME.bg,
+            anchor="w",
+        )
+        self._subtitle_lbl.pack(anchor="w")
 
         # Sağ: Tool Paths button + Dil seçimi
         self._tool_paths_btn = tk.Button(
@@ -332,36 +369,29 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         )
         self._lang_menu.pack(side="left")
 
-        self._subtitle_lbl = tk.Label(
-            self._content,
-            text=t("app_subtitle"),
-            font=FONTS.small,
-            fg=THEME.muted,
-            bg=THEME.bg,
+        tk.Frame(self._content, bg=THEME.border, height=1).pack(
+            fill="x", padx=16, pady=(10, 12),
         )
-        self._subtitle_lbl.pack()
 
-        tk.Frame(self._content, bg=THEME.border, height=1).pack(fill="x", padx=30, pady=18)
-
-    def _build_drop_zones(self) -> None:
+    def _build_drop_zones(self, parent: tk.Frame) -> None:
         """Dosya seçim alanlarını oluşturur."""
         self.zone_src = DropZone(
-            self._content, t("source_audio"), THEME.accent, self._on_src_pick,
+            parent, t("source_audio"), THEME.accent, self._on_src_pick,
         )
-        self.zone_src.pack(fill="x", padx=30, pady=(0, 12))
+        self.zone_src.pack(fill="x", pady=(0, 8))
 
         self.zone_sync = DropZone(
-            self._content, t("sync_audio"), THEME.accent2, self._on_sync_pick,
+            parent, t("sync_audio"), THEME.accent2, self._on_sync_pick,
         )
-        self.zone_sync.pack(fill="x", padx=30, pady=(0, 12))
+        self.zone_sync.pack(fill="x", pady=(0, 8))
 
-    def _build_options_panel(self) -> None:
+    def _build_options_panel(self, parent: tk.Frame) -> None:
         """Tespit ayarları panelini oluşturur."""
         options = tk.Frame(
-            self._content, bg=THEME.card,
+            parent, bg=THEME.card,
             highlightbackground=THEME.border, highlightthickness=1,
         )
-        options.pack(fill="x", padx=30, pady=(0, 14))
+        options.pack(fill="x", pady=(0, 8))
 
         self._options_title_lbl = tk.Label(
             options, text=t("detection_settings"), font=FONTS.small,
@@ -397,11 +427,37 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             relief="flat", font=FONTS.mono,
         ).pack(side="right")
 
-        # 48 kHz zorla
-        self._force_48k_cb = tk.Checkbutton(
-            options,
-            text=t("force_48k"),
-            variable=self.force_48k_var,
+        self._force_48k_cb = self._option_checkbox(
+            options, "force_48k", self.force_48k_var, pady=(0, 8),
+        )
+        self._force_48k_note_lbl = self._option_note(options, "force_48k_note")
+
+        # Zamanlama düzeltmeleri.  İkisi de "ölçüm güvenilirse düzelt" mantığını
+        # paylaştığı için tek bir not ikisini birden açıklar; ayrı ayrı
+        # anlatmak paneli gereksiz uzatıyordu.
+        self._correct_drift_cb = self._option_checkbox(
+            options, "correct_drift", self.correct_drift_var,
+        )
+        self._correct_steps_cb = self._option_checkbox(
+            options, "correct_steps", self.correct_steps_var,
+        )
+        self._timing_note_lbl = self._option_note(
+            options, "timing_corrections_note", pady=(0, 10),
+        )
+
+    def _option_checkbox(
+        self,
+        parent: tk.Frame,
+        key: str,
+        variable: tk.BooleanVar,
+        *,
+        pady: tuple[int, int] = (0, 2),
+    ) -> tk.Checkbutton:
+        """One themed settings checkbox — the styling lives here, not per widget."""
+        box = tk.Checkbutton(
+            parent,
+            text=t(key),
+            variable=variable,
             onvalue=True,
             offvalue=False,
             bg=THEME.card,
@@ -414,26 +470,37 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             relief="flat",
             highlightthickness=0,
         )
-        self._force_48k_cb.pack(fill="x", padx=14, pady=(0, 8))
+        box.pack(fill="x", padx=14, pady=pady)
+        return box
 
-        self._force_48k_note_lbl = tk.Label(
-            options,
-            text=t("force_48k_note"),
-            font=FONTS.small,
+    def _option_note(
+        self,
+        parent: tk.Frame,
+        key: str,
+        *,
+        pady: tuple[int, int] = (0, 6),
+    ) -> tk.Label:
+        """Explanatory small print under a settings control."""
+        note = tk.Label(
+            parent,
+            text=t(key),
+            font=FONTS.tiny,
             fg=THEME.muted,
             bg=THEME.card,
             anchor="w",
             justify="left",
+            wraplength=330,
         )
-        self._force_48k_note_lbl.pack(fill="x", padx=14, pady=(0, 10))
+        note.pack(fill="x", padx=14, pady=pady)
+        return note
 
-    def _build_sync_mode_panel(self) -> None:
+    def _build_sync_mode_panel(self, parent: tk.Frame) -> None:
         """Senkronizasyon modu seçim panelini oluşturur."""
         self._sync_mode_frame = tk.Frame(
-            self._content, bg=THEME.card,
+            parent, bg=THEME.card,
             highlightbackground=THEME.border, highlightthickness=1,
         )
-        self._sync_mode_frame.pack(fill="x", padx=30, pady=(0, 14))
+        self._sync_mode_frame.pack(fill="x", pady=(0, 8))
 
         self._sync_mode_title_lbl = tk.Label(
             self._sync_mode_frame, text=t("sync_mode"), font=FONTS.small,
@@ -450,10 +517,12 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         )
         self._sync_mode_label.pack(side="left")
 
+        turkish = self._i18n.language == Language.TR
+        self.sync_mode_var.set(SyncMode.ADELAY_AMIX.label(turkish))
         self._sync_mode_menu = tk.OptionMenu(
             mode_row,
             self.sync_mode_var,
-            *[sm.display_name for sm in SyncMode],
+            *[sm.label(turkish) for sm in SyncMode],
         )
         self._sync_mode_menu.config(
             bg=THEME.input_bg, fg=THEME.text, font=FONTS.small,
@@ -489,13 +558,13 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self.sync_mode_var.trace_add("write", self._on_sync_mode_change)
         self._update_sync_mode_description()
 
-    def _build_fps_panel(self) -> None:
+    def _build_fps_panel(self, parent: tk.Frame) -> None:
         """FPS dönüşüm ayarları panelini oluşturur."""
         self._fps_frame = tk.Frame(
-            self._content, bg=THEME.card,
+            parent, bg=THEME.card,
             highlightbackground=THEME.border, highlightthickness=1,
         )
-        self._fps_frame.pack(fill="x", padx=30, pady=(0, 14))
+        self._fps_frame.pack(fill="x", pady=(0, 8))
 
         self._fps_title_lbl = tk.Label(
             self._fps_frame, text=t("fps_conversion"), font=FONTS.small,
@@ -520,7 +589,14 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             highlightthickness=0,
             command=self._on_fps_toggle,
         )
-        self._fps_enable_cb.pack(fill="x", padx=14, pady=(0, 6))
+        self._fps_enable_cb.pack(fill="x", padx=14, pady=(0, 2))
+
+        # Detection is checked against the result before it is kept, so leaving
+        # this on cannot make a correct pair worse — it only rescues the pairs
+        # whose rate difference is too large to measure any other way.
+        self._fps_auto_cb = self._option_checkbox(
+            self._fps_frame, "fps_auto", self.fps_auto_var, pady=(0, 6),
+        )
 
         self._fps_settings_frame = tk.Frame(self._fps_frame, bg=THEME.card)
         self._fps_settings_frame.pack(fill="x", padx=14, pady=(0, 10))
@@ -754,14 +830,14 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._update_bitrate_options()
         self._update_format_description()
 
-    def _build_encoding_panel(self) -> None:
+    def _build_encoding_panel(self, parent: tk.Frame) -> None:
         """Build the unified encoding pipeline panel."""
         # Main card
         card = tk.Frame(
-            self._content, bg=THEME.card,
+            parent, bg=THEME.card,
             highlightbackground=THEME.border, highlightthickness=1,
         )
-        card.pack(fill="x", padx=30, pady=(0, 14))
+        card.pack(fill="x", pady=(0, 8))
 
         # Title
         self._encoding_title_lbl = tk.Label(
@@ -1121,16 +1197,51 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
 
         self.schedule_later(50, self._fit_to_content)
 
-    def _build_info_panel(self) -> None:
-        """Bilgi panelini oluşturur."""
+    def _build_info_panel(self, parent: tk.Frame) -> None:
+        """Ölçüm panelini oluşturur.
+
+        Bu aracın ürettiği tek asıl sayı gecikmedir; v2.3'te dört eşit satırdan
+        biri olarak, diğer meta verilerle aynı puntoda gösteriliyordu.  Burada
+        gecikme bir ölçüm aleti ekranı gibi öne çıkar; güven ve drift ise onu
+        yorumlamaya yarayan yardımcı telemetri olarak hemen altında durur.
+        """
         info_frame = tk.Frame(
-            self._content, bg=THEME.card,
+            parent, bg=THEME.card,
             highlightbackground=THEME.border, highlightthickness=1,
         )
-        info_frame.pack(fill="x", padx=30, pady=(0, 14))
+        info_frame.pack(fill="x", pady=(0, 8))
 
+        self._readout_caption = tk.Label(
+            info_frame, text=t("detected_delay").rstrip(":").upper(),
+            font=FONTS.section, fg=THEME.muted, bg=THEME.card, anchor="w",
+        )
+        self._readout_caption.pack(fill="x", padx=14, pady=(9, 0))
+
+        # Değer ve birim aynı satırda ama ayrı boyutta: sayı tek başına okunur
+        # kalsın, "ms" onu küçültmesin.
+        value_row = tk.Frame(info_frame, bg=THEME.card)
+        value_row.pack(fill="x", padx=14, pady=(0, 2))
+        self.delay_val = tk.Label(
+            value_row, text="—", font=FONTS.readout,
+            fg=THEME.muted, bg=THEME.card, anchor="w",
+        )
+        self.delay_val.pack(side="left")
+        self._readout_unit = tk.Label(
+            value_row, text="", font=FONTS.readout_unit,
+            fg=THEME.muted, bg=THEME.card,
+        )
+        self._readout_unit.pack(side="left", padx=(6, 0), pady=(0, 7))
+
+        self._readout_detail = tk.Label(
+            info_frame, text=t("readout_idle"), font=FONTS.small,
+            fg=THEME.muted, bg=THEME.card, anchor="w", justify="left",
+        )
+        self._readout_detail.pack(fill="x", padx=14, pady=(0, 9))
+
+        tk.Frame(info_frame, bg=THEME.border, height=1).pack(fill="x")
+
+        # Çıktı özellikleri — ölçümün değil, üretilecek dosyanın bilgisi.
         rows = [
-            ("detected_delay", "delay_val"),
             ("channel", "ch_val"),
             ("bit_depth", "bit_val"),
             ("output_sample_rate", "sr_val"),
@@ -1139,8 +1250,8 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         for i, (key, attr) in enumerate(rows):
             row = tk.Frame(info_frame, bg=THEME.card)
             row.pack(
-                fill="x", padx=16,
-                pady=(8 if i == 0 else 4, 8 if i == len(rows) - 1 else 4),
+                fill="x", padx=14,
+                pady=(7 if i == 0 else 2, 8 if i == len(rows) - 1 else 2),
             )
             lbl_left = tk.Label(
                 row, text=t(key), font=FONTS.small,
@@ -1149,19 +1260,37 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             lbl_left.pack(side="left")
             lbl = tk.Label(
                 row, text="—", font=FONTS.info_value,
-                fg=THEME.accent, bg=THEME.card,
+                fg=THEME.text, bg=THEME.card,
             )
             lbl.pack(side="right")
             setattr(self, attr, lbl)
             self._info_labels.append((lbl_left, key))
 
-    def _build_log_panel(self) -> None:
+    def _show_readout(
+        self,
+        delay_ms: float | None,
+        *,
+        detail: str = "",
+        colour: str | None = None,
+    ) -> None:
+        """Drive the measurement display."""
+        if delay_ms is None:
+            self.delay_val.config(text="—", fg=THEME.muted)
+            self._readout_unit.config(text="")
+            self._readout_detail.config(text=detail or t("readout_idle"), fg=THEME.muted)
+            return
+
+        self.delay_val.config(text=f"{delay_ms:+.0f}", fg=colour or THEME.accent)
+        self._readout_unit.config(text="ms", fg=THEME.muted)
+        self._readout_detail.config(text=detail, fg=colour or THEME.muted)
+
+    def _build_log_panel(self, parent: tk.Frame) -> None:
         """Log panelini oluşturur."""
         log_outer = tk.Frame(
-            self._content, bg=THEME.card,
+            parent, bg=THEME.card,
             highlightbackground=THEME.border, highlightthickness=1,
         )
-        log_outer.pack(fill="x", padx=30, pady=(0, 14))
+        log_outer.pack(fill="x", pady=(0, 8))
         self._log_title_lbl = tk.Label(
             log_outer, text=t("log_label"), font=FONTS.small,
             fg=THEME.muted, bg=THEME.card, anchor="w",
@@ -1170,7 +1299,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
 
         self.log_box = tk.Text(
             log_outer,
-            height=6,
+            height=9,
             bg=THEME.input_bg,
             fg=THEME.text,
             font=FONTS.mono,
@@ -1181,7 +1310,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             padx=8,
             pady=6,
         )
-        self.log_box.pack(fill="x", padx=8, pady=(2, 10))
+        self.log_box.pack(fill="both", expand=True, padx=8, pady=(2, 8))
 
     def _build_bottom_bar(self) -> None:
         """İlerleme çubuğu ve çalıştır butonunu sabit alt çubukta oluşturur.
@@ -1197,65 +1326,37 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
 
         # İlerleme çubuğu
         self.progress_canvas = tk.Canvas(
-            self._bottom_bar, height=4, bg=THEME.border, highlightthickness=0,
+            self._bottom_bar, height=3, bg=THEME.border, highlightthickness=0,
         )
-        self.progress_canvas.pack(fill="x", padx=30, pady=(8, 2))
+        self.progress_canvas.pack(fill="x")
         self._progress_bar = self.progress_canvas.create_rectangle(
-            0, 0, 0, 4, fill=THEME.accent, outline="",
+            0, 0, 0, 3, fill=THEME.accent, outline="",
         )
 
-        # Aşama ve yüzde göstergesi — çubuk tek başına ne kadar kaldığını
-        # söylemiyordu, uzun işlemlerde takıldı izlenimi veriyordu.
-        status_row = tk.Frame(self._bottom_bar, bg=THEME.bg)
-        status_row.pack(fill="x", padx=30, pady=(0, 6))
+        # Tek sıra: solda durum metni, sağda eylemler.  v2.3'te üç düğme alt
+        # alta tam genişlikte duruyor ve 800 piksellik pencerenin dörtte birini
+        # yiyordu; üçü de aynı görsel ağırlıkta olduğu için hangisinin asıl
+        # eylem olduğu da belli olmuyordu.
+        bar = tk.Frame(self._bottom_bar, bg=THEME.bg)
+        bar.pack(fill="x", padx=16, pady=10)
+
+        status_col = tk.Frame(bar, bg=THEME.bg)
+        status_col.pack(side="left", fill="x", expand=True)
         self._status_lbl = tk.Label(
-            status_row, text="", font=FONTS.small,
+            status_col, text="", font=FONTS.small,
             fg=THEME.muted, bg=THEME.bg, anchor="w",
         )
         self._status_lbl.pack(side="left")
         self._percent_lbl = tk.Label(
-            status_row, text="", font=FONTS.small,
-            fg=THEME.muted, bg=THEME.bg, anchor="e",
+            status_col, text="", font=FONTS.mono,
+            fg=THEME.muted, bg=THEME.bg, anchor="w",
         )
-        self._percent_lbl.pack(side="right")
+        self._percent_lbl.pack(side="left", padx=(8, 0))
 
-        # Analiz butonu
-        self.analyze_btn = tk.Button(
-            self._bottom_bar,
-            text=t("analyze_only"),
-            font=FONTS.button,
-            fg=THEME.bg,
-            bg=THEME.accent2,
-            activebackground=THEME.accent2,
-            activeforeground=THEME.bg,
-            relief="flat",
-            padx=0,
-            pady=12,
-            cursor="hand2",
-            command=self._start_analyze,
-        )
-        self.analyze_btn.pack(fill="x", padx=30, pady=(0, 6))
-
-        self.cancel_btn = tk.Button(
-            self._bottom_bar,
-            text=t("btn_cancel"),
-            font=FONTS.button,
-            fg=THEME.text,
-            bg=THEME.card,
-            activebackground=THEME.card,
-            activeforeground=THEME.text,
-            relief="flat",
-            padx=0,
-            pady=10,
-            cursor="hand2",
-            state="disabled",
-            command=self._cancel_processing,
-        )
-        self.cancel_btn.pack(fill="x", padx=30, pady=(0, 6))
-
-        # Çalıştır butonu
+        # Sağdan sola paketlenir; bu yüzden asıl eylem en sağda kalsın diye
+        # önce o eklenir.
         self.run_btn = tk.Button(
-            self._bottom_bar,
+            bar,
             text=t("start_sync"),
             font=FONTS.button,
             fg=THEME.bg,
@@ -1263,12 +1364,64 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             activebackground=THEME.accent,
             activeforeground=THEME.bg,
             relief="flat",
-            padx=0,
-            pady=12,
+            padx=20,
+            pady=9,
             cursor="hand2",
             command=self._start,
         )
-        self.run_btn.pack(fill="x", padx=30, pady=(0, 12))
+        self.run_btn.pack(side="right")
+
+        self.analyze_btn = tk.Button(
+            bar,
+            text=t("analyze_only"),
+            font=FONTS.button,
+            fg=THEME.accent2,
+            bg=THEME.card,
+            activebackground=THEME.raised,
+            activeforeground=THEME.accent2,
+            relief="flat",
+            padx=16,
+            pady=9,
+            cursor="hand2",
+            command=self._start_analyze,
+        )
+        self.analyze_btn.pack(side="right", padx=(0, 8))
+
+        # İptal yalnızca iptal edilecek bir şey varken görünür.
+        self.cancel_btn = tk.Button(
+            bar,
+            text=t("btn_cancel"),
+            font=FONTS.button,
+            fg=THEME.muted,
+            bg=THEME.card,
+            activebackground=THEME.raised,
+            activeforeground=THEME.err,
+            relief="flat",
+            padx=16,
+            pady=9,
+            cursor="hand2",
+            state="disabled",
+            command=self._cancel_processing,
+        )
+        self._cancel_visible = False
+
+    def _set_cancel_active(self, active: bool) -> None:
+        """Show Cancel only while there is something to cancel.
+
+        A permanently visible disabled button reads as a control that does not
+        work; the action bar stays quieter when it offers only what is
+        currently possible.
+        """
+        self.cancel_btn.config(
+            state="normal" if active else "disabled",
+            text=t("btn_cancel"),
+        )
+        if active and not self._cancel_visible:
+            self.cancel_btn.pack(side="right", padx=(0, 8))
+            self._cancel_visible = True
+        elif not active and self._cancel_visible:
+            self.cancel_btn.pack_forget()
+            self._cancel_visible = False
 
     # ── Dil Değişikliği ──────────────────────────────────────────────────
 
@@ -1428,16 +1581,26 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         self._scan_window_lbl.config(text=t("scan_window_count"))
         self._force_48k_cb.config(text=t("force_48k"))
         self._force_48k_note_lbl.config(text=t("force_48k_note"))
+        self._correct_drift_cb.config(text=t("correct_drift"))
+        self._correct_steps_cb.config(text=t("correct_steps"))
+        self._timing_note_lbl.config(text=t("timing_corrections_note"))
+
+        # Ölçüm paneli — değer yerinde kalır, yalnızca etiketler çevrilir.
+        self._readout_caption.config(text=t("detected_delay").rstrip(":").upper())
+        if self.delay_val.cget("text") == "—":
+            self._readout_detail.config(text=t("readout_idle"))
 
         # Senkronizasyon modu
         self._sync_mode_title_lbl.config(text=t("sync_mode"))
         self._sync_mode_label.config(text=t("sync_mode_label"))
         self._sync_mode_note_lbl.config(text=t("sync_mode_note"))
+        self._rebuild_sync_mode_menu()
         self._update_sync_mode_description()
 
         # FPS
         self._fps_title_lbl.config(text=t("fps_conversion"))
         self._fps_enable_cb.config(text=t("fps_enable"))
+        self._fps_auto_cb.config(text=t("fps_auto"))
         self._fps_conv_lbl.config(text=t("fps_conversion_label"))
         self._fps_note_lbl.config(text=t("fps_note"))
         self._update_fps_ratio_label()
@@ -1506,20 +1669,36 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
     def _update_sync_mode_description(self) -> None:
         """Senkronizasyon modu açıklama etiketini günceller."""
         mode = self._get_selected_sync_mode()
-        if mode is not None:
-            lang = self._i18n.language
-            desc = mode.description_tr if lang == Language.TR else mode.description_en
-            self._sync_mode_desc_lbl.config(text=f"  → {desc}")
-        else:
-            self._sync_mode_desc_lbl.config(text="")
+        turkish = self._i18n.language == Language.TR
+        desc = mode.description_tr if turkish else mode.description_en
+        self._sync_mode_desc_lbl.config(text=f"  → {desc}")
 
-    def _get_selected_sync_mode(self) -> SyncMode | None:
-        """Seçili senkronizasyon modunu döndürür."""
+    def _get_selected_sync_mode(self) -> SyncMode:
+        """Seçili senkronizasyon modunu döndürür.
+
+        Etiket iki dilde de eşleştirilir; aksi hâlde dil değişince menüdeki
+        seçim geçerli bir moda karşılık gelmez ve sessizce varsayılana düşerdi.
+        """
         selected = self.sync_mode_var.get()
         for sm in SyncMode:
-            if sm.display_name == selected:
+            if selected in (sm.display_name, sm.display_name_tr):
                 return sm
         return SyncMode.ADELAY_AMIX
+
+    def _rebuild_sync_mode_menu(self) -> None:
+        """Relabel the mode menu after a language change."""
+        turkish = self._i18n.language == Language.TR
+        current = self._get_selected_sync_mode()
+
+        menu = self._sync_mode_menu["menu"]
+        menu.delete(0, "end")
+        for mode in SyncMode:
+            label = mode.label(turkish)
+            menu.add_command(
+                label=label,
+                command=lambda value=label: self.sync_mode_var.set(value),
+            )
+        self.sync_mode_var.set(current.label(turkish))
 
     # ── FPS UI Yardımcıları ──────────────────────────────────────────────
 
@@ -2155,7 +2334,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
 
         self._cancel_event.clear()
         self.analyze_btn.config(state="disabled", text=t("analyzing"))
-        self.cancel_btn.config(state="normal", text=t("btn_cancel"))
+        self._set_cancel_active(True)
         self.run_btn.config(state="disabled")
         self._clear_log()
         self._set_progress(0)
@@ -2252,6 +2431,34 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             else:
                 self._log(t("drift_none"))
 
+            # Worth saying even when the drift could not be measured — that is
+            # exactly the case a large frame-rate mismatch produces.
+            suspected = SyncPipeline.suspected_fps_conversion(result)
+            if suspected is not None and not self.fps_enabled_var.get():
+                self._log(t("drift_looks_like_fps", name=suspected.display_name))
+
+            # Analyze-only has to show the regions too, otherwise the single
+            # headline delay looks wrong to anyone whose file actually steps.
+            if result.has_step_discontinuity:
+                self._log(
+                    t(
+                        "steps_found",
+                        count=len(result.offset_regions),
+                        span=result.step_span_ms,
+                    )
+                )
+                for region in result.offset_regions:
+                    start, end = region.bounds_in_minutes(t("steps_region_end"))
+                    self._log(
+                        t(
+                            "steps_region",
+                            start=start,
+                            end=end,
+                            lag=region.lag_ms,
+                            windows=region.window_count,
+                        )
+                    )
+
             self._log(t("coarse_delay", coarse_ms=result.coarse_ms))
             self._log(t("segments_used", used=result.used_segments, total=result.total_segments))
 
@@ -2283,7 +2490,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                     self._processing = False
                 self._cancel_event.clear()
                 self.analyze_btn.config(state="normal", text=t("analyze_only"))
-                self.cancel_btn.config(state="disabled", text=t("btn_cancel"))
+                self._set_cancel_active(False)
                 self.run_btn.config(state="normal", text=t("start_sync"))
 
             self.schedule(_restore)
@@ -2454,7 +2661,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         if self.fps_enabled_var.get():
             fps_conversion = self._get_selected_fps_conversion()
 
-        sync_mode = self._get_selected_sync_mode() or SyncMode.ADELAY_AMIX
+        sync_mode = self._get_selected_sync_mode()
 
         deew_params: dict | None = None
         if deew_enabled:
@@ -2474,14 +2681,30 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
 
         self._cancel_event.clear()
         self.analyze_btn.config(state="disabled")
-        self.cancel_btn.config(state="normal", text=t("btn_cancel"))
+        self._set_cancel_active(True)
         self.run_btn.config(state="disabled", text=t("processing"))
         self._set_progress(0)
 
+        # Keyword arguments, not a positional tuple: the list has grown to a
+        # dozen entries and a mis-ordered tuple would silently pass the wrong
+        # value rather than fail.
         threading.Thread(
             target=self._process,
-            args=(src_path, sync_path, out_path, skip_sec, segment_count, force_48k,
-                  fps_conversion, deew_params, sync_mode, encoding_params),
+            kwargs={
+                "src_path": src_path,
+                "sync_path": sync_path,
+                "out_path": out_path,
+                "skip_sec": skip_sec,
+                "segment_count": segment_count,
+                "force_48k": force_48k,
+                "fps_conversion": fps_conversion,
+                "deew_params": deew_params,
+                "sync_mode": sync_mode,
+                "encoding_params": encoding_params,
+                "correct_drift": self.correct_drift_var.get(),
+                "correct_steps": self.correct_steps_var.get(),
+                "auto_fps": self.fps_auto_var.get(),
+            },
             daemon=True,
         ).start()
 
@@ -2503,6 +2726,9 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         deew_params: dict | None = None,
         sync_mode: SyncMode = SyncMode.ADELAY_AMIX,
         encoding_params: dict | None = None,
+        correct_drift: bool = True,
+        correct_steps: bool = True,
+        auto_fps: bool = True,
     ) -> None:
         """Run the typed, atomic synchronization pipeline on a worker thread."""
         enc = encoding_params or {}
@@ -2600,6 +2826,9 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                 fps_conversion=fps_conversion,
                 sync_mode=sync_mode,
                 encoding=encoding,
+                correct_drift=correct_drift,
+                correct_steps=correct_steps,
+                auto_fps_conversion=auto_fps,
             )
             outcome = self._pipeline.run(
                 request,
@@ -2654,7 +2883,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             def _restore_buttons() -> None:
                 self._cancel_event.clear()
                 self.analyze_btn.config(state="normal", text=t("analyze_only"))
-                self.cancel_btn.config(state="disabled", text=t("btn_cancel"))
+                self._set_cancel_active(False)
                 self.run_btn.config(state="normal", text=t("start_sync"))
 
             self.schedule(_restore_buttons)
@@ -2663,7 +2892,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         with self._processing_lock:
             self._processing = False
         self._cancel_event.clear()
-        self.schedule(lambda: self.cancel_btn.config(state="disabled", text=t("btn_cancel")))
+        self.schedule(lambda: self._set_cancel_active(False))
 
     # ── Bilgi Gösterimi ──────────────────────────────────────────────────
 
@@ -2694,10 +2923,42 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             relation = t("sync_behind")
         label_color = THEME.accent if result.delay_ms >= 0 else THEME.accent2
 
+        # Güven skoru korelasyon tepesinin gürültü tabanına oranıdır; kullanıcı
+        # bu ölçeği bilmek zorunda kalmasın diye sözle nitelendirilir.  Ayrıca
+        # pencereler birbirinden çok ayrışıyorsa skor yüksek olsa bile sonuç
+        # dosyanın tamamı için geçerli değildir — bu, skoru geçersiz kılar.
+        scattered = result.windows_disagree_ms >= self._config.window_disagreement_warn_ms
+        if scattered or result.confidence < 2.0:
+            quality, quality_colour = t("confidence_weak"), THEME.err
+        elif result.confidence >= 4.0:
+            quality, quality_colour = t("confidence_strong"), THEME.ok
+        else:
+            quality, quality_colour = t("confidence_fair"), THEME.warn
+
+        detail = t(
+            "readout_detail",
+            relation=relation,
+            quality=quality,
+            used=result.used_segments,
+            total=result.total_segments,
+        )
+        if result.has_step_discontinuity:
+            detail += t(
+                "readout_steps",
+                count=len(result.offset_regions),
+                span=result.step_span_ms,
+            )
+        elif result.drift_ms_per_min is not None and abs(result.drift_ms_per_min) >= 1.0:
+            detail += t("readout_drift", drift=result.drift_ms_per_min)
+
+        if scattered:
+            detail += t("readout_scattered", spread=result.windows_disagree_ms)
+
         self.schedule(
-            lambda: self.delay_val.config(
-                text=f"{abs(result.delay_ms):.1f} ms  ({relation})",
-                fg=label_color,
+            lambda: self._show_readout(
+                result.delay_ms,
+                detail=detail,
+                colour=label_color if result.confidence >= 2.0 else quality_colour,
             ),
         )
 
@@ -2748,12 +3009,44 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             w = self.progress_canvas.winfo_width()
             x = int(w * pct / 100)
             self.progress_canvas.coords(self._progress_bar, 0, 0, x, 4)
-            self._percent_lbl.config(text=f"%{pct}" if pct else "")
+            # "%100" is the Turkish form; it was hard-coded and leaked into the
+            # English UI. The i18n table decides which side the sign goes on.
+            self._percent_lbl.config(text=t("percent", pct=pct) if pct else "")
 
         self.schedule(_draw)
 
     def _fit_to_content(self) -> None:
-        """Update scroll region without changing window size."""
+        """Refresh the scroll region and, on first layout, size the window.
+
+        The initial size is derived from what the content actually needs rather
+        than hard-coded, then clamped to the work area.  v2.3 opened at a fixed
+        800×800 regardless of the 1262 px of content behind it, so the primary
+        action sat below the fold on every screen.
+        """
         self.update_idletasks()
-        if hasattr(self, '_canvas'):
-            self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+        if not hasattr(self, "_canvas"):
+            return
+
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+
+        if getattr(self, "_initial_size_applied", False):
+            return
+        self._initial_size_applied = True
+
+        content_w = self._content.winfo_reqwidth()
+        content_h = self._content.winfo_reqheight()
+        chrome_h = self._bottom_bar.winfo_reqheight()
+
+        # Leave room for the taskbar and window frame; a window that opens
+        # partly off-screen is worse than one that opens slightly small.
+        # Past ~1100 px the two columns just grow whitespace, so cap the width
+        # rather than letting a 4K display stretch the layout across the desk.
+        max_w = min(1100, int(self.winfo_screenwidth() * 0.94))
+        max_h = int(self.winfo_screenheight() * 0.88)
+
+        width = max(self.minsize()[0], min(content_w + 24, max_w))
+        height = max(self.minsize()[1], min(content_h + chrome_h + 16, max_h))
+
+        x = max(0, (self.winfo_screenwidth() - width) // 2)
+        y = max(0, (self.winfo_screenheight() - height) // 3)
+        self.geometry(f"{width}x{height}+{x}+{y}")

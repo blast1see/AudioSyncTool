@@ -60,15 +60,13 @@ class DropZone(tk.Frame):
         self.config(highlightbackground=self._default_border, highlightthickness=1)
 
         self._build_header(label, color)
-        self._build_filename_label()
-        self._build_drop_hint()
-        self._build_select_button(color)
+        self._build_file_row(color)
         self._setup_drag_drop()
 
     def _build_header(self, label: str, color: str) -> None:
         """Build the header row."""
         self._header_frame = tk.Frame(self, bg=THEME.card)
-        self._header_frame.pack(fill="x", padx=16, pady=(14, 4))
+        self._header_frame.pack(fill="x", padx=14, pady=(9, 2))
         self._dot_lbl = tk.Label(
             self._header_frame, text="●", font=FONTS.dot, fg=color, bg=THEME.card,
         )
@@ -78,35 +76,19 @@ class DropZone(tk.Frame):
         )
         self._label_lbl.pack(side="left")
 
-    def _build_filename_label(self) -> None:
-        """Build the filename display label."""
-        self._name_lbl = tk.Label(
-            self,
-            text=t("no_file_selected"),
-            font=FONTS.small,
-            fg=THEME.muted,
-            bg=THEME.card,
-            width=54,
-            justify="center",
-        )
-        self._name_lbl.pack(pady=(0, 4))
+    def _build_file_row(self, color: str) -> None:
+        """Build the filename line and its picker button on one row.
 
-    def _build_drop_hint(self) -> None:
-        """Build the drag & drop hint label."""
-        self._drop_hint_lbl = tk.Label(
-            self,
-            text=t("drop_hint"),
-            font=FONTS.small,
-            fg=THEME.muted,
-            bg=THEME.card,
-            justify="center",
-        )
-        self._drop_hint_lbl.pack(pady=(0, 6))
+        The filename, the drop hint and the button used to be three stacked,
+        centred blocks, which made every zone about 155 px tall and forced the
+        card to be 54 characters wide.  Side by side they read as one control
+        and take roughly half the height.
+        """
+        row = tk.Frame(self, bg=THEME.card)
+        row.pack(fill="x", padx=14, pady=(0, 11))
 
-    def _build_select_button(self, color: str) -> None:
-        """Build the file selection button."""
         self._select_btn = tk.Button(
-            self,
+            row,
             text=t("select_file"),
             font=FONTS.button,
             fg=THEME.bg,
@@ -114,12 +96,35 @@ class DropZone(tk.Frame):
             activebackground=color,
             activeforeground=THEME.bg,
             relief="flat",
-            padx=18,
-            pady=6,
+            padx=16,
+            pady=5,
             cursor="hand2",
             command=self._pick,
         )
-        self._select_btn.pack(pady=(0, 14))
+        self._select_btn.pack(side="right", padx=(10, 0))
+
+        name_col = tk.Frame(row, bg=THEME.card)
+        name_col.pack(side="left", fill="x", expand=True)
+        self._name_lbl = tk.Label(
+            name_col,
+            text=t("no_file_selected"),
+            font=FONTS.small,
+            fg=THEME.muted,
+            bg=THEME.card,
+            anchor="w",
+            justify="left",
+        )
+        self._name_lbl.pack(fill="x")
+        self._drop_hint_lbl = tk.Label(
+            name_col,
+            text=t("drop_hint"),
+            font=FONTS.tiny,
+            fg=THEME.muted,
+            bg=THEME.card,
+            anchor="w",
+            justify="left",
+        )
+        self._drop_hint_lbl.pack(fill="x")
 
     def _setup_drag_drop(self) -> None:
         """Set up drag & drop if tkinterdnd2 is available."""

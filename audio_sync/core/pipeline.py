@@ -21,6 +21,7 @@ from audio_sync.config import (
     QaacConfig,
     SyncConfig,
     SyncMode,
+    match_drift_to_fps,
 )
 from audio_sync.core.deew_encoder import encode_wav_with_deew, resolve_deew_backend
 from audio_sync.core.encoder import QaacEncoder
@@ -29,6 +30,7 @@ from audio_sync.core.models import (
     AnalysisResult,
     AudioInfo,
     EncodingError,
+    OffsetRegion,
     OperationCancelledError,
     OutputSampleRate,
     UnsafeOutputPathError,
@@ -67,6 +69,9 @@ class SyncRequest:
     fps_conversion: FpsConversion | None = None
     sync_mode: SyncMode = SyncMode.ADELAY_AMIX
     encoding: EncodingRequest = EncodingRequest()
+    correct_drift: bool = True
+    correct_steps: bool = True
+    auto_fps_conversion: bool = True
 
 
 @dataclass(frozen=True)
@@ -80,6 +85,9 @@ class SyncOutcome:
     output_sample_rate: OutputSampleRate
     sync_summary: str
     encoding_summary: str | None = None
+    drift_applied_ms_per_min: float | None = None
+    offset_regions_applied: tuple[OffsetRegion, ...] = ()
+    fps_conversion_applied: FpsConversion | None = None
 
 
 class SyncPipeline:
@@ -178,6 +186,118 @@ class SyncPipeline:
                 )
                 self._check_cancelled(cancel_event)
 
+                applied_fps = request.fps_conversion
+                if applied_fps is None and request.auto_fps_conversion:
+                    detected = self.suspected_fps_conversion(analysis)
+                    if detected is not None:
+                        # Correcting a rate mismatch afterwards is second best:
+                        # by the end of a feature the two tracks are seconds
+                        # apart, which is further than the segment search can
+                        # follow, so the measurement degrades exactly where it
+                        # matters.  Converting first removes the difference
+                        # before anything tries to measure around it — worth a
+                        # second analysis pass, which only happens when a
+                        # mismatch was actually found.
+                        log(
+                            f"Detected a {detected.display_name} frame-rate "
+                            f"mismatch; converting and re-analyzing."
+                        )
+                        progress(52)
+                        fps_path = work_dir / "auto-fps-converted.wav"
+                        self._ffmpeg.apply_fps_conversion(
+                            request.sync_path,
+                            str(fps_path),
+                            detected,
+                            sync_info,
+                            cancel_event=cancel_event,
+                        )
+                        effective_sync = str(fps_path)
+                        sync_info = self._ffmpeg.probe_audio(effective_sync)
+                        sync_rate, sync_pcm, _ = self._ffmpeg.decode_mono_pcm_to_file(
+                            effective_sync,
+                            cancel_event=cancel_event,
+                            prefix="sync-fps-",
+                            temp_dir=str(work_dir),
+                        )
+                        retried = self._get_analyzer().calculate_delay_from_pcm_files(
+                            source_rate,
+                            source_pcm,
+                            sync_pcm,
+                            sync_rate=sync_rate,
+                            skip_intro_sec=request.skip_intro_sec,
+                            total_segments=request.total_segments,
+                        )
+                        analysis, applied_fps = self._better_analysis(
+                            analysis, retried, detected, log
+                        )
+                        if applied_fps is None:
+                            effective_sync = request.sync_path
+                            sync_info = self._ffmpeg.probe_audio(effective_sync)
+                        self._check_cancelled(cancel_event)
+
+                regions_to_apply = self.resolve_offset_regions(
+                    analysis,
+                    enabled=request.correct_steps,
+                )
+                if regions_to_apply:
+                    log(
+                        f"Offset steps {analysis.step_span_ms:.0f} ms across "
+                        f"{len(regions_to_apply)} regions; splicing instead of "
+                        f"applying one delay:"
+                    )
+                    for region in regions_to_apply:
+                        start, end = region.bounds_in_minutes()
+                        log(
+                            f"   {start:5.1f} min – {end}: "
+                            f"{region.lag_ms:+.1f} ms "
+                            f"({region.window_count} windows)"
+                        )
+
+                # A frame-rate mismatch is a fixed-ratio speed error, so it shows
+                # up as a very specific slope.  Naming it turns "your audio
+                # drifts" into a setting the user can pick — and the FPS path
+                # removes the slide *before* analysis, which is the only way to
+                # handle a mismatch too large for the segment search to follow.
+                if applied_fps is None and not request.auto_fps_conversion:
+                    suspected = self.suspected_fps_conversion(analysis)
+                    if suspected is not None:
+                        log(
+                            f"These two tracks look like the same content at "
+                            f"different frame rates ({suspected.display_name}). "
+                            f"Enable that FPS conversion and run again — it "
+                            f"removes the speed difference before the analysis "
+                            f"instead of chasing it afterwards."
+                        )
+
+                if analysis.windows_disagree_ms >= self._config.window_disagreement_warn_ms:
+                    log(
+                        f"Warning: the validated windows disagree by about "
+                        f"{analysis.windows_disagree_ms:.0f} ms. The sources are "
+                        f"probably different cuts, or drift further apart than "
+                        f"the search can follow — one delay will not hold across "
+                        f"the whole file."
+                    )
+
+                drift_to_apply, delay_to_apply = self.resolve_drift_correction(
+                    analysis,
+                    enabled=request.correct_drift and not regions_to_apply,
+                    config=self._config,
+                )
+                if drift_to_apply is not None:
+                    log(
+                        f"Correcting progressive drift of "
+                        f"{drift_to_apply:+.2f} ms/min "
+                        f"(fit R²={analysis.drift_r2:.2f})"
+                    )
+                elif analysis.drift_ms_per_min is not None and abs(
+                    analysis.drift_ms_per_min
+                ) >= self._config.drift_warning_threshold:
+                    log(
+                        f"Warning: drift of {analysis.drift_ms_per_min:+.2f} ms/min "
+                        f"detected but not corrected; a single offset cannot hold "
+                        f"sync across the whole file."
+                    )
+
                 needs_encoding = request.encoding.pipeline is not EncodingPipeline.NONE
                 synced_wav = work_dir / "synchronized.wav" if needs_encoding else staged_output
                 log("Applying synchronization…")
@@ -185,12 +305,14 @@ class SyncPipeline:
                 sync_summary = self._ffmpeg.apply_sync(
                     request.source_path,
                     effective_sync,
-                    analysis.delay_ms,
+                    delay_to_apply,
                     sync_info,
                     output_sr,
                     str(synced_wav),
                     sync_mode=request.sync_mode,
                     cancel_event=cancel_event,
+                    drift_ms_per_min=drift_to_apply,
+                    offset_regions=regions_to_apply,
                 )
                 self._require_nonempty_file(synced_wav, "synchronized WAV")
 
@@ -212,9 +334,16 @@ class SyncPipeline:
                         raise
                     except Exception as exc:
                         fallback = self._preserve_fallback(synced_wav, output_path)
+                        # Keeping the WAV saves repeating the analysis, but it is
+                        # uncompressed and as long as the film — several GB for a
+                        # feature.  Say how big it is, or it sits on the disk
+                        # unnoticed until something runs out of space.
                         raise EncodingError(
-                            f"Final encoding failed. Synchronized WAV preserved at "
-                            f"'{fallback}': {exc}",
+                            f"Final encoding failed: {exc}\n"
+                            f"The synchronized audio was kept so you do not have "
+                            f"to analyze again — delete it once you no longer need "
+                            f"it:\n"
+                            f"  {fallback}  ({self._describe_size(fallback)})",
                             fallback_path=str(fallback),
                         ) from exc
                 else:
@@ -234,9 +363,122 @@ class SyncPipeline:
                     output_sample_rate=output_sr,
                     sync_summary=sync_summary,
                     encoding_summary=encoding_summary,
+                    drift_applied_ms_per_min=drift_to_apply,
+                    offset_regions_applied=regions_to_apply,
+                    fps_conversion_applied=applied_fps,
                 )
         finally:
             staged_output.unlink(missing_ok=True)
+
+    @staticmethod
+    def _better_analysis(
+        original: AnalysisResult,
+        converted: AnalysisResult,
+        conversion: FpsConversion,
+        log: LogCallback,
+    ) -> tuple[AnalysisResult, FpsConversion | None]:
+        """Keep the frame-rate conversion only if it actually read better.
+
+        Detection has been right on everything tested, but acting on it changes
+        the audio, so the claim is checked rather than trusted: the conversion
+        stays only when the windows agree more closely than they did without it.
+        Window agreement is the right measure — a rate mismatch is precisely
+        what makes windows from different parts of the file disagree.
+        """
+        before = original.windows_disagree_ms
+        after = converted.windows_disagree_ms
+
+        if after < before or (after == before and converted.used_segments > original.used_segments):
+            log(
+                f"FPS conversion applied: window disagreement "
+                f"{before:.0f} ms → {after:.0f} ms."
+            )
+            return converted, conversion
+
+        log(
+            f"FPS conversion did not improve the reading "
+            f"({before:.0f} ms → {after:.0f} ms); keeping the original audio."
+        )
+        return original, None
+
+    @staticmethod
+    def suspected_fps_conversion(analysis: AnalysisResult) -> FpsConversion | None:
+        """The frame-rate conversion these two tracks appear to need.
+
+        Two independent signals point at the same answer, and either alone is
+        incomplete.  Resampling the coarse features by each standard ratio finds
+        a mismatch even when it is too large for the segment search to measure —
+        which is precisely the case that needs the hint most.  Matching the
+        measured slope catches the milder cases where the analysis succeeded but
+        the cause is still a frame rate.
+        """
+        if analysis.suspected_fps_conversion:
+            try:
+                return FpsConversion[analysis.suspected_fps_conversion]
+            except KeyError:  # pragma: no cover - defensive
+                pass
+        if analysis.drift_ms_per_min is not None:
+            return match_drift_to_fps(analysis.drift_ms_per_min)
+        return None
+
+    @staticmethod
+    def resolve_offset_regions(
+        analysis: AnalysisResult,
+        *,
+        enabled: bool,
+    ) -> tuple[OffsetRegion, ...]:
+        """Return the regions to splice, or an empty tuple to use one offset.
+
+        Splicing cuts the audio, so it is only worth doing when the analyzer
+        genuinely found more than one offset in the file.  Everything that
+        decides *whether* a step is real lives in the detector; this is the
+        switch the caller controls.
+        """
+        if not enabled or not analysis.has_step_discontinuity:
+            return ()
+        return analysis.offset_regions
+
+    @staticmethod
+    def resolve_drift_correction(
+        analysis: AnalysisResult,
+        *,
+        enabled: bool,
+        config: SyncConfig = SYNC_CONFIG,
+    ) -> tuple[float | None, float]:
+        """Decide whether to retime the track, and with which offset.
+
+        Returns ``(drift_ms_per_min_or_None, delay_ms_to_apply)``.
+
+        When a drift correction is applied the offset must come from the fitted
+        line's intercept rather than ``delay_ms``: the latter is a median across
+        segments, so it describes the middle of the content and would leave the
+        track half the total drift out of sync at both ends.
+
+        A correction is only worth its resampling cost when the slope is both
+        large enough to matter and well enough supported by the data.  Every
+        threshold lives in :class:`SyncConfig` so the whole gate can be tuned
+        from one place; refusing a real drift merely leaves the previous
+        behaviour, while applying a phantom one damages a correct track.
+
+        A file whose offset *steps* is excluded here rather than in the result
+        object: a line fitted through a step has a slope, but it does not mean
+        anything, and the piecewise path handles that case instead.
+        """
+        if not enabled or analysis.has_step_discontinuity:
+            return None, analysis.delay_ms
+        if not analysis.has_drift_measurement:
+            return None, analysis.delay_ms
+
+        drift = float(analysis.drift_ms_per_min or 0.0)
+        if (
+            abs(drift) < config.drift_correction_min_ms_per_min
+            or (analysis.drift_r2 or 0.0) < config.drift_correction_min_r2
+            or analysis.used_segments < config.drift_correction_min_segments
+            or analysis.drift_span_sec < config.drift_correction_min_span_sec
+        ):
+            return None, analysis.delay_ms
+
+        return drift, float(analysis.drift_intercept_ms or 0.0)
 
     @staticmethod
     def normalize_request(request: SyncRequest) -> SyncRequest:
@@ -380,6 +622,20 @@ class SyncPipeline:
         )
         os.close(descriptor)
         return Path(path)
+
+    @staticmethod
+    def _describe_size(path: Path) -> str:
+        """Human-readable file size, for messages about disk usage."""
+        try:
+            size = float(path.stat().st_size)
+        except OSError:  # pragma: no cover - defensive
+            return "size unknown"
+
+        for unit in ("B", "KB", "MB", "GB"):
+            if size < 1024.0 or unit == "GB":
+                return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} B"
+            size /= 1024.0
+        return f"{size:.1f} GB"  # pragma: no cover - unreachable
 
     @staticmethod
     def _preserve_fallback(synced_wav: Path, output_path: Path) -> Path:

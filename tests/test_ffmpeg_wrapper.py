@@ -102,33 +102,29 @@ def test_availability_is_cached_per_resolved_binary(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize(
-    ("delay_ms", "expected", "unexpected"),
+    ("delay_ms", "expected"),
     [
-        (12.5, "adelay=12.500|12.500", "atempo="),
-        (-12.5, "atrim=start=0.012500", "atempo="),
-        (0.0, "acopy", "atempo="),
+        (12.5, "adelay=12.500|12.500"),
+        (-12.5, "atrim=start=0.012500"),
+        (0.0, "acopy"),
     ],
 )
-def test_atempo_compatibility_mode_uses_exact_offset(
-    monkeypatch, delay_ms, expected, unexpected
-) -> None:
+def test_offset_only_sync_never_stretches_time(monkeypatch, delay_ms, expected) -> None:
+    """Without a measured drift, a constant offset must stay a constant offset."""
     monkeypatch.setattr("audio_sync.core.ffmpeg_wrapper.resolve_tool", lambda name: name)
-    wrapper = FFmpegWrapper()
-    cmd, summary = wrapper._build_sync_atempo(
-        "source.wav",
+    cmd, summary = FFmpegWrapper().build_sync_command(
         "sync.wav",
         delay_ms,
-        abs(delay_ms),
-        2,
-        "pcm_s16le",
+        AudioInfo(2, PcmCodec.S16LE, 16, 44_100),
         OutputSampleRate.decide(48_000, 44_100, False),
         "out.wav",
     )
     command = " ".join(cmd)
     assert expected in command
-    assert unexpected not in command
+    assert "atempo=" not in command
+    assert "rubberband" not in command
     assert "-ar" not in cmd
-    assert "[atempo]" in summary
+    assert summary
 
 
 @pytest.mark.parametrize("mode", list(SyncMode))
