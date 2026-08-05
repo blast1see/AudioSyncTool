@@ -25,10 +25,6 @@ class Language(Enum):
 
 TRANSLATIONS: Dict[str, Dict[str, str]] = {
     # ── Başlık ve Genel ──
-    "app_title": {
-        "tr": "Audio Sync Tool",
-        "en": "Audio Sync Tool",
-    },
     "app_subtitle": {
         "tr": "Sağlam gecikme tespiti & senkronizasyon",
         "en": "Robust delay detection & synchronization",
@@ -123,18 +119,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     },
 
     # ── Deew Encoding ──
-    "deew_encoding": {
-        "tr": "DEEW ENCODING",
-        "en": "DEEW ENCODING",
-    },
-    "deew_enable": {
-        "tr": "Senkronizasyon sonrası AC3/EAC3'e dönüştür",
-        "en": "Convert to AC3/EAC3 after synchronization",
-    },
-    "encoder_label": {
-        "tr": "ENCODER",
-        "en": "ENCODER",
-    },
     "format_label": {
         "tr": "FORMAT",
         "en": "FORMAT",
@@ -163,10 +147,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "Deew ● hazır",
         "en": "Deew ● ready",
     },
-    "deew_not_installed": {
-        "tr": "Deew ● kurulu değil",
-        "en": "Deew ● not installed",
-    },
     "deew_unavailable": {
         "tr": "Deew ● kullanılamıyor",
         "en": "Deew ● unavailable",
@@ -179,17 +159,9 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "  → Deew ile AC3/EAC3 çıktı oluştur",
         "en": "  → Create AC3/EAC3 output with Deew",
     },
-    "ffmpeg_enc_desc": {
-        "tr": "  → FFmpeg dahili AC3/EAC3 encoder (ek araç gerektirmez)",
-        "en": "  → FFmpeg built-in AC3/EAC3 encoder (no additional tools required)",
-    },
     "deew_note": {
         "tr": "Not: Deew kurulu ve çalışır durumda olmalıdır.",
         "en": "Note: Deew must be installed and working.",
-    },
-    "ffmpeg_enc_note": {
-        "tr": "Not: FFmpeg dahili encoder kullanılır, ek kurulum gerekmez.",
-        "en": "Note: FFmpeg built-in encoder is used, no additional setup required.",
     },
     "default_bitrate": {
         "tr": "varsayılan",
@@ -363,10 +335,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "Senkronize: {name}",
         "en": "Sync: {name}",
     },
-    "log_reading_info": {
-        "tr": "Ses bilgileri okunuyor…",
-        "en": "Reading audio information…",
-    },
     "log_fps_applying": {
         "tr": "FPS dönüşümü uygulanıyor: {name}",
         "en": "Applying FPS conversion: {name}",
@@ -374,18 +342,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "log_fps_done": {
         "tr": "FPS dönüşümü tamamlandı, dönüştürülmüş ses kullanılacak.",
         "en": "FPS conversion completed, converted audio will be used.",
-    },
-    "log_preparing_mono": {
-        "tr": "Analiz için tek kanallı ses akışı hazırlanıyor…",
-        "en": "Preparing mono analysis audio…",
-    },
-    "log_analyzing": {
-        "tr": "Sağlam senkron analizi yapılıyor…",
-        "en": "Performing robust sync analysis…",
-    },
-    "log_applying_sync": {
-        "tr": "FFmpeg ile senkronizasyon uygulanıyor…",
-        "en": "Applying synchronization with FFmpeg…",
     },
     "log_timing": {
         "tr": "Süre: {step} ({seconds:.2f} sn)",
@@ -435,10 +391,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "Nihai kayma: {ms:+.1f} ms  [{relation}]",
         "en": "Final delay: {ms:+.1f} ms  [{relation}]",
     },
-    "log_completed": {
-        "tr": "✓ Tamamlandı → {name}",
-        "en": "✓ Completed → {name}",
-    },
     "log_error": {
         "tr": "✗ Hata: {err}",
         "en": "✗ Error: {err}",
@@ -451,24 +403,8 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "İşlem kullanıcı tarafından iptal edildi.",
         "en": "Operation cancelled by user.",
     },
-    "log_sync_mode": {
-        "tr": "Senkronizasyon modu: {mode}",
-        "en": "Synchronization mode: {mode}",
-    },
 
     # ── Deew Encoding Log ──
-    "log_ffmpeg_deew_start": {
-        "tr": "FFmpeg ile Deew çıktısı için encode başlıyor…",
-        "en": "Starting FFmpeg encode for Deew output…",
-    },
-    "log_deew_info": {
-        "tr": "Format: {fmt}  |  Bitrate: {br} kbps  |  Kanal: {ch}  |  Encoder: {enc}",
-        "en": "Format: {fmt}  |  Bitrate: {br} kbps  |  Channel: {ch}  |  Encoder: {enc}",
-    },
-    "log_ffmpeg_deew_done": {
-        "tr": "✓ FFmpeg encode tamamlandı → {name}",
-        "en": "✓ FFmpeg encode completed → {name}",
-    },
     "log_intermediate_wav_deleted": {
         "tr": "Ara WAV dosyası silindi.",
         "en": "Intermediate WAV file deleted.",
@@ -476,10 +412,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "log_intermediate_wav_delete_fail": {
         "tr": "Uyarı: Ara WAV dosyası silinemedi.",
         "en": "Warning: Could not delete intermediate WAV file.",
-    },
-    "log_ffmpeg_enc_error": {
-        "tr": "✗ FFmpeg encoding hatası: {err}",
-        "en": "✗ FFmpeg encoding error: {err}",
     },
     "log_wav_preserved": {
         "tr": "WAV dosyası korundu: {name}",
@@ -515,10 +447,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "✓ Deew encoding tamamlandı → {name}",
         "en": "✓ Deew encoding completed → {name}",
     },
-    "log_deew_error": {
-        "tr": "✗ Deew hatası: {err}",
-        "en": "✗ Deew error: {err}",
-    },
 
     # ── Offset Açıklamaları ──
     "sync_ahead": {
@@ -535,14 +463,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "{ch} kanal",
         "en": "{ch} channels",
     },
-    "source_keep": {
-        "tr": "kaynak",
-        "en": "source",
-    },
-    "keep_source_sr": {
-        "tr": "kaynağı koru (zaten 48 kHz)",
-        "en": "keep source (already 48 kHz)",
-    },
 
     # ── MKV / Container Stream Selection ──
     "mkv_select_title": {
@@ -552,10 +472,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "mkv_select_prompt": {
         "tr": "Bu dosyada birden fazla ses akışı bulundu.\nLütfen kullanmak istediğiniz akışı seçin:",
         "en": "Multiple audio streams found in this file.\nPlease select the stream you want to use:",
-    },
-    "mkv_stream_label": {
-        "tr": "#{idx}: {codec} | {ch}ch | {rate}Hz | {lang}{title}",
-        "en": "#{idx}: {codec} | {ch}ch | {rate}Hz | {lang}{title}",
     },
     "mkv_extracting": {
         "tr": "Ses akışı çıkarılıyor…",
@@ -590,10 +506,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "drop_hover": {
         "tr": "Dosyayı bırakın…",
         "en": "Drop file here…",
-    },
-    "container_files": {
-        "tr": "Video/Container Dosyaları",
-        "en": "Video/Container Files",
     },
 
     # ── Common Buttons ──
@@ -721,14 +633,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "Bitrate (kbps)",
         "en": "Bitrate (kbps)",
     },
-    "encoding_compression": {
-        "tr": "Sıkıştırma Seviyesi",
-        "en": "Compression Level",
-    },
-    "encoding_quality": {
-        "tr": "Kalite",
-        "en": "Quality",
-    },
     "encoding_mode": {
         "tr": "Kodlama Modu",
         "en": "Encoding Mode",
@@ -741,21 +645,9 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "Gecikme Yok (--no-delay)",
         "en": "No Delay (--no-delay)",
     },
-    "encoding_started": {
-        "tr": "🔄 Kodlama başlatılıyor…",
-        "en": "🔄 Starting encoding…",
-    },
     "encoding_complete": {
         "tr": "✅ Kodlama tamamlandı: {summary}",
         "en": "✅ Encoding complete: {summary}",
-    },
-    "encoding_error": {
-        "tr": "❌ Kodlama hatası: {error}",
-        "en": "❌ Encoding error: {error}",
-    },
-    "qaac_not_found": {
-        "tr": "qaac bulunamadı. Lütfen qaac'ı yükleyin ve PATH'e ekleyin (beklenen konum: C:\\qaac).",
-        "en": "qaac not found. Please install qaac and add it to PATH (expected at C:\\qaac).",
     },
     "ffmpeg_aac_label": {
         "tr": "AAC (FFmpeg)",
@@ -801,10 +693,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "AAC Bitrate (kbps)",
         "en": "AAC Bitrate (kbps)",
     },
-    "flac_compression_label": {
-        "tr": "FLAC Sıkıştırma (0-8)",
-        "en": "FLAC Compression (0-8)",
-    },
     "opus_bitrate_label": {
         "tr": "Opus Bitrate (kbps)",
         "en": "Opus Bitrate (kbps)",
@@ -838,14 +726,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "flac_24bit": {
         "tr": "24-bit",
         "en": "24-bit",
-    },
-    "intermediate_wav_cleanup": {
-        "tr": "🗑️ Ara WAV dosyası silindi.",
-        "en": "🗑️ Intermediate WAV file deleted.",
-    },
-    "sync_wav_output": {
-        "tr": "📝 Senkron WAV çıktısı oluşturuldu.",
-        "en": "📝 Sync WAV output created.",
     },
 
     # ── Tool Path Settings ──
@@ -896,10 +776,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "tool_path_found": {
         "tr": "✓ Bulundu: {path}",
         "en": "✓ Found: {path}",
-    },
-    "tool_paths_saved": {
-        "tr": "Araç yolları kaydedildi.",
-        "en": "Tool paths saved.",
     },
     # The dialog's own buttons.  These used to borrow the *result* message
     # ("Tool paths saved.") as the button label, so a button that had not been
