@@ -211,50 +211,75 @@ def resolve_tool(name: str) -> str:
 
 
 class SyncMode(Enum):
-    """FFmpeg ses senkronizasyon filtre modları.
+    """FFmpeg ses senkronizasyon filtre stratejileri.
 
-    Her mod farklı bir FFmpeg filtre stratejisi kullanır:
-        - ADELAY_AMIX: Varsayılan — adelay / atrim ile gecikme uygulama.
-        - ARESAMPLE: aresample filtresi ile örnekleme oranı tabanlı senkronizasyon.
-        - ATEMPO: geriye uyumlu ad; kesin adelay / atrim ofset düzeltmesi.
-        - RUBBERBAND: librubberband tabanlı yüksek kaliteli zaman uzatma/sıkıştırma.
-        - APAD: basit geciktirme/kırpma tabanlı senkronizasyon.
-        - ASYNCTS: agresif async resample tabanlı senkronizasyon.
+    Sürüm 2.4 öncesinde altı mod tanımlıydı ancak beşi bayt bayt aynı çıktıyı
+    üretiyordu: ``adelay``/``atrim`` dışındaki filtreler ya hiç eklenmiyor ya da
+    (``rubberband=tempo=1.0`` gibi) hiçbir şey yapmayan bir geçiş aşamasıydı.
+    Bu yüzden mod listesi gerçekten farklı davranan üç seçeneğe indirildi;
+    kaldırılan adlar :data:`LEGACY_SYNC_MODE_ALIASES` ile eşlenerek eski
+    ayarların bozulması önlenir.
 
     Attributes:
         filter_name: FFmpeg filtre adı.
         display_name: Kullanıcıya gösterilecek açıklama.
         description_tr: Türkçe açıklama.
         description_en: İngilizce açıklama.
+        is_default: Öntanımlı seçim mi?
     """
 
-    ADELAY_AMIX = ("adelay+amix", "adelay / atrim (Default)",
-                   "Gecikme uygulama / kırpma — en güvenilir yöntem",
-                   "Delay / trim synchronization — most reliable method")
-    ARESAMPLE = ("aresample", "aresample",
-                 "Örnekleme oranı tabanlı senkronizasyon",
-                 "Sample rate based synchronization")
-    ATEMPO = ("atempo", "atempo (exact offset)",
-              "Geriye uyumlu mod: sabit ofseti kesin kırpma/geciktirme ile uygular",
-              "Compatibility mode: applies exact trim/delay for constant offsets")
-    RUBBERBAND = ("rubberband", "rubberband (high quality)",
-                  "Kırpma + rubberband kalite iyileştirme (librubberband gerektirir)",
-                  "Trim + rubberband quality enhancement (requires librubberband)")
-    APAD = ("delay+trim", "delay / trim (simple)",
-            "Basit geciktirme/kırpma tabanlı senkronizasyon",
-            "Simple delay/trim synchronization")
-    ASYNCTS = ("async-resample", "async resample (1000)",
-               "Agresif async resample tabanlı senkronizasyon",
-               "Aggressive async resample synchronization")
+    ADELAY_AMIX = ("precise",
+                   "Precise offset (Default)", "Kesin ofset (Varsayılan)",
+                   "Örnek hassasiyetinde gecikme/kırpma — neredeyse her durumda doğru seçim",
+                   "Sample-accurate delay/trim — the right choice in almost every case",
+                   True)
+    ARESAMPLE = ("aresample",
+                 "Repair timestamps", "Zaman damgası onarımı",
+                 "Ofsetten sonra aresample=async=1 ekler; zaman damgası bozuk "
+                 "yayın/VFR kayıtları için",
+                 "Adds aresample=async=1 after the offset; for stream or VFR "
+                 "captures with broken timestamps",
+                 False)
+    RUBBERBAND = ("rubberband",
+                  "Rubber Band stretch", "Rubber Band germe",
+                  "Drift düzeltmesini librubberband ile uygular; yalnızca drift "
+                  "varsa devreye girer (librubberband gerektirir)",
+                  "Performs drift correction with librubberband; only engages "
+                  "when drift is present (requires librubberband)",
+                  False)
 
     def __init__(
-        self, filter_name: str, display_name: str,
+        self, filter_name: str, display_name: str, display_name_tr: str,
         description_tr: str, description_en: str,
+        is_default: bool = False,
     ) -> None:
         self.filter_name = filter_name
         self.display_name = display_name
+        self.display_name_tr = display_name_tr
         self.description_tr = description_tr
         self.description_en = description_en
+        self.is_default = is_default
+
+    def label(self, turkish: bool) -> str:
+        """Return the menu label for the active language."""
+        return self.display_name_tr if turkish else self.display_name
+
+
+# Retired members map onto whichever surviving mode reproduces the behaviour
+# they actually had, so a saved preference or an older script keeps working.
+LEGACY_SYNC_MODE_ALIASES: dict[str, SyncMode] = {
+    "ATEMPO": SyncMode.ADELAY_AMIX,
+    "APAD": SyncMode.ADELAY_AMIX,
+    "ASYNCTS": SyncMode.ARESAMPLE,
+}
+
+
+def sync_mode_from_name(name: str) -> SyncMode:
+    """Resolve a mode by member name, tolerating the retired v2.3 names."""
+    try:
+        return SyncMode[name]
+    except KeyError:
+        return LEGACY_SYNC_MODE_ALIASES.get(name, SyncMode.ADELAY_AMIX)
 
 
 # ── Tema Renkleri ────────────────────────────────────────────────────────────
@@ -262,32 +287,74 @@ class SyncMode(Enum):
 
 @dataclass(frozen=True)
 class Theme:
-    """Uygulama renk paleti.  ``frozen=True`` ile değiştirilemez."""
+    """Uygulama renk paleti.  ``frozen=True`` ile değiştirilemez.
 
-    bg: str = "#0f0f13"
-    card: str = "#1a1a22"
+    Renkler dekoratif değil anlamlıdır: ``accent`` her yerde *kaynak/referans*
+    parçayı, ``accent2`` ise *senkronize edilen* parçayı temsil eder.  Böylece
+    kullanıcı hangi kartın hangi dosyaya ait olduğunu okumadan görebilir.
+    """
+
+    bg: str = "#0d0e12"
+    card: str = "#16181f"
+    raised: str = "#1d202a"
     accent: str = "#6c63ff"
     accent2: str = "#ff6584"
-    text: str = "#e8e8f0"
-    muted: str = "#6b6b82"
-    border: str = "#2a2a3a"
-    input_bg: str = "#11111a"
+    text: str = "#e6e8ef"
+    muted: str = "#7c8296"
+    border: str = "#262a36"
+    input_bg: str = "#0b0c10"
+
+    # Durum renkleri — ölçüm güvenilirliği ve uyarılar için.
+    ok: str = "#3ddc97"
+    warn: str = "#ffb454"
+    err: str = "#ff5c5c"
 
 
 # ── Fontlar ──────────────────────────────────────────────────────────────────
 
 
+def _ui_family() -> str:
+    """Pick the native interface face for the current platform."""
+    if sys.platform == "win32":
+        return "Segoe UI"
+    if sys.platform == "darwin":
+        return "SF Pro Text"
+    return "DejaVu Sans"
+
+
+def _mono_family() -> str:
+    """Pick the face used for measurements, paths and the log."""
+    if sys.platform == "win32":
+        return "Consolas"
+    if sys.platform == "darwin":
+        return "SF Mono"
+    return "DejaVu Sans Mono"
+
+
 @dataclass(frozen=True)
 class Fonts:
-    """Uygulama font tanımları."""
+    """Uygulama font tanımları.
 
-    label: tuple[str, int] = ("Courier New", 10)
-    small: tuple[str, int] = ("Courier New", 9)
-    mono: tuple[str, int] = ("Courier New", 10)
-    button: tuple[str, int, str] = ("Courier New", 10, "bold")
-    header: tuple[str, int, str] = ("Courier New", 28, "bold")
-    dot: tuple[str, int] = ("Courier New", 14)
-    info_value: tuple[str, int, str] = ("Courier New", 10, "bold")
+    İki ses vardır: arayüz metni için sistemin yerel arayüz fontu, ölçüm
+    değerleri ve log için eşaralıklı font.  v2.3'te her şey ``Courier New``
+    ile yazılıyordu; bu hem okunabilirliği düşürüyor hem de rakamların
+    hizalanmasından gelen "ölçüm aleti" hissini bir üslup değil varsayılan
+    haline getiriyordu.
+    """
+
+    label: tuple[str, int] = (_ui_family(), 9)
+    small: tuple[str, int] = (_ui_family(), 9)
+    tiny: tuple[str, int] = (_ui_family(), 8)
+    section: tuple[str, int, str] = (_ui_family(), 8, "bold")
+    mono: tuple[str, int] = (_mono_family(), 9)
+    button: tuple[str, int, str] = (_ui_family(), 10, "bold")
+    header: tuple[str, int, str] = (_ui_family(), 19, "bold")
+    dot: tuple[str, int] = (_ui_family(), 11)
+    info_value: tuple[str, int, str] = (_mono_family(), 10, "bold")
+
+    # Ölçüm ekranı — aracın tek asıl çıktısı olan gecikme değeri için.
+    readout: tuple[str, int, str] = (_mono_family(), 30, "bold")
+    readout_unit: tuple[str, int] = (_mono_family(), 12)
 
 
 # ── PCM Codec Enum ──────────────────────────────────────────────────────────
@@ -326,6 +393,39 @@ class FpsConversion(Enum):
             Kaynak/hedef FPS oranı. Nihai ``atempo`` değeri bunun tersidir.
         """
         return self.source_fps / self.target_fps
+
+    @property
+    def corrects_drift_ms_per_min(self) -> float:
+        """Bu dönüşümün gideridiği drift (ms/dk).
+
+        Bir kare hızı uyuşmazlığı sabit oranlı bir hız hatasıdır; ölçülen drift
+        de öyle.  İkisini aynı birimde ifade etmek, ölçümü tabloyla
+        karşılaştırıp "bu aslında bir FPS sorunu" diyebilmeyi sağlar.
+        """
+        return (1.0 - (self.target_fps / self.source_fps)) * 60_000.0
+
+
+def match_drift_to_fps(
+    drift_ms_per_min: float,
+    tolerance_ms_per_min: float = 4.0,
+) -> FpsConversion | None:
+    """Identify a measured drift as a standard frame-rate mismatch.
+
+    A dub mastered at the wrong rate drifts by a very specific amount — about
+    60 ms/min for a 24 vs 23.976 mismatch, about 2.5 s/min for PAL — so a
+    measured slope near one of those numbers is not a coincidence.  Saying which
+    conversion it is turns "your audio drifts" into "your audio is the wrong
+    frame rate, here is the one to pick", and the FPS path corrects it *before*
+    analysis rather than fighting the search window afterwards.
+    """
+    best: FpsConversion | None = None
+    best_error = tolerance_ms_per_min
+    for conversion in FpsConversion:
+        error = abs(conversion.corrects_drift_ms_per_min - drift_ms_per_min)
+        if error < best_error:
+            best_error = error
+            best = conversion
+    return best
 
 
 @dataclass(frozen=True)
@@ -430,6 +530,25 @@ class SyncConfig:
     offset_map_min_points: int = 3
     validation_refine_multiplier: int = 2
 
+    # Kaba drift kancası — dosyanın başı ve sonu ``local_search_sec``'ten fazla
+    # ayrışıyorsa segment doğrulaması tek bir ofsetin etrafında arayarak
+    # dosyanın çoğunu ıskalar.  Bu eşikler ne zaman iki noktalı bir doğruyla
+    # yönlendirileceğini belirler.
+    coarse_drift_min_spread_sec: float = 1.0
+    coarse_drift_max_spread_sec: float = 120.0
+    coarse_drift_min_score: float = 2.0
+
+    # Doğrulanan pencerelerin birbirinden bu kadar ayrıştığı bir ölçüm, tek bir
+    # gecikmeyle tüm dosyayı hizalayamaz; kullanıcı bunu sessizce öğrenmemeli.
+    # Temiz bir çift ~15 ms'de oturur, 100 ms yapısal bir uyuşmazlığa işaret eder.
+    window_disagreement_warn_ms: float = 100.0
+
+    # Kare hızı uyuşmazlığını doğrudan sınama: hedefin öznitelik akışı standart
+    # oranlarla yeniden örneklenip skorlanır.  Kazanan oranın, dönüşümsüz
+    # duruma göre skoru bu kat kadar iyileştirmesi gerekir.
+    rate_mismatch_detection: bool = True
+    rate_mismatch_min_gain: float = 1.25
+
     # FFmpeg
     ffmpeg_timeout_sec: int = 300
     ffmpeg_timeout_per_gib_sec: int = 120
@@ -439,6 +558,60 @@ class SyncConfig:
 
     # Drift uyarı eşiği (ms/dk)
     drift_warning_threshold: float = 20.0
+
+    # Drift düzeltmesi için gereken en küçük eğim (ms/dk).  1 ms/dk, iki
+    # saatlik bir filmde 120 ms birikir — duyulur bir kayma.  Bunun altındaki
+    # değerler ölçüm gürültüsünden ayırt edilemez ve tüm parçayı boş yere
+    # yeniden zamanlamaya değmez.
+    drift_correction_min_ms_per_min: float = 1.0
+    # Drift düzeltmesinin diğer üç koşulu.  Bunlar bir zamanlar
+    # ``AnalysisResult`` içine gömülüydü; yarısı buradan ayarlanıp yarısı
+    # ayarlanamayınca ``drift_correction_min_ms_per_min``'i düşüren bir kullanıcı
+    # hiçbir etki göremiyordu.  Karar tek yerde verilsin.
+    drift_correction_min_r2: float = 0.80
+    drift_correction_min_segments: int = 6
+    drift_correction_min_span_sec: float = 60.0
+
+    # Basamak (step) tespiti — kurgu farkından doğan ani ofset sıçramaları.
+    step_detection_enabled: bool = True
+    # 40 ms altındaki fark, sesi kesip eklemenin getireceği riske değmez;
+    # dudak senkronu bu büyüklükte zaten kusursuz sayılır.
+    step_min_ms: float = 40.0
+    # Her iki tarafın da bağımsız kanıtı olmalı; tek pencere basamak yaratamaz.
+    step_min_windows: int = 4
+    # İki dakikadan kısa bir "bölge" büyük olasılıkla ölçüm gürültüsüdür.
+    step_min_region_sec: float = 120.0
+    step_max_regions: int = 8
+    # Bölünmenin maliyeti, sıçrama büyüklüğünün bu katı kadar düşürmesi gerekir.
+    step_min_cost_gain: float = 2.0
+    # Zayıf korele olmuş pencereler basamak sınırı çizemez.
+    step_min_window_score: float = 2.5
+    # Sıçrama, pencerelerin kendi saçılmasının en az bu katı olmalı; aksi hâlde
+    # sınır gürültünün içine çizilmiş olur.
+    step_min_snr: float = 4.0
+    # Basamak modeli, doğru modeline göre maliyeti en fazla bu orana
+    # düşürebiliyorsa kesmeye değmez — düzgün artan bir ofset drifttir.
+    step_vs_line_margin: float = 0.55
+    # Aykırı pencere elemesi: her pencere önündeki ve arkasındaki bu kadar
+    # komşunun medyanıyla ayrı ayrı karşılaştırılır, iyi olan taraf sayılır.
+    step_outlier_neighbours: int = 3
+    step_outlier_tolerance: float = 6.0
+    # Elemenin yiyebileceği en büyük pencere oranı — kaskad koruması.
+    step_outlier_max_fraction: float = 0.35
+    # Sınır konumlarının yinelemeli iyileştirmesi; birkaç geçişte oturur.
+    step_boundary_refine_passes: int = 4
+    # Sınırı sesin kendisinde ikili arama ile daraltma.  Pencereler seyrek
+    # olduğunda ortalama tahmini onlarca dakika şaşabiliyor.
+    step_boundary_audio_search: bool = True
+    step_boundary_probe_sec: float = 24.0
+    # Sınır ne kadar şaşarsa, aradaki süre boyunca hata tam basamak kadar olur;
+    # bu yüzden aramayı saniyeler mertebesine kadar sürdürmeye değer.
+    step_boundary_search_iterations: int = 16
+    step_boundary_search_precision_sec: float = 4.0
+    step_boundary_search_min_gap_sec: float = 60.0
+    step_boundary_min_margin: float = 0.02
+    # Ek yerlerine uygulanan kısa sönümleme — tıklama sesini engeller.
+    step_splice_fade_sec: float = 0.008
 
 
 # ── Deew Encoder Yapılandırması ──────────────────────────────────────────────
