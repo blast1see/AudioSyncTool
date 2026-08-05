@@ -79,6 +79,24 @@ Two failure modes to watch for when writing such a harness:
   synchronization already succeeded and re-analyzing a feature is expensive. The
   error message reports its size so it does not sit unnoticed.
 
+## A trap worth not re-entering
+
+`build_piecewise_filter` opens the source **once per region** rather than
+fanning one decoder out with `asplit`. That looks wasteful and it is tempting to
+"optimise" — don't.
+
+Splitting one decoder couples the branches: `concat` drains the first piece
+while the later branches are handed frames they cannot use yet, and whether that
+resolves depends on the FFmpeg build. The `asplit` version ran in under a second
+against a 2026 git build and **hung for over half an hour** on the FFmpeg that
+ships with Ubuntu, on a CI job that normally finishes in forty seconds. The
+integration test `test_each_region_reads_its_own_input` exists to catch a
+regression here.
+
+If the extra decoding ever does become a problem, the safe direction is an input
+level `-ss` per region so each input only reads its own slice — not going back
+to a shared decoder.
+
 ## External tools
 
 `ffmpeg` and `ffprobe` are required; `deew` and `qaac` are optional. They are
