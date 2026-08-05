@@ -35,6 +35,7 @@ from audio_sync.core.models import (
     OutputSampleRate,
 )
 from audio_sync.core.process_runner import run_binary_process, run_text_process
+from audio_sync.i18n import t
 from audio_sync.utils import scale_timeout_for_size
 
 # Cached ``ffmpeg``/``ffprobe`` locations that already answered ``-version``.
@@ -516,11 +517,13 @@ class FFmpegWrapper:
             out_path,
         ]
 
-        cmd_summary = (
-            f"FPS dönüşümü: {conversion.display_name}  |  "
-            f"atempo={atempo_value:.6f}  |  "
-            f"oran: {ratio:.6f}  |  "
-            f"bit: {audio_info.bits}  |  sr: {sample_rate} Hz"
+        cmd_summary = t(
+            "log_fps_summary",
+            name=conversion.display_name,
+            tempo=atempo_value,
+            ratio=ratio,
+            bits=audio_info.bits,
+            rate=sample_rate,
         )
 
         result = self._run_command(

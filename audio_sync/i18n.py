@@ -486,8 +486,30 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "WAV file preserved: {name}",
     },
     "log_deew_start": {
-        "tr": "Deew ile encoding başlıyor…",
-        "en": "Starting encoding with Deew…",
+        "tr": "Deew ile {fmt} encoding başlıyor…",
+        "en": "Starting {fmt} encoding with Deew…",
+    },
+    "log_deew_output_moved": {
+        "tr": "Çıktı dosyası taşındı: {name}",
+        "en": "Output file moved: {name}",
+    },
+    "log_fps_summary": {
+        "tr": "FPS dönüşümü: {name}  |  atempo={tempo:.6f}  |  oran: {ratio:.6f}"
+              "  |  bit: {bits}  |  sr: {rate} Hz",
+        "en": "FPS conversion: {name}  |  atempo={tempo:.6f}  |  ratio: {ratio:.6f}"
+              "  |  bits: {bits}  |  sr: {rate} Hz",
+    },
+    "err_qaac_missing": {
+        "tr": "'{binary}' çalıştırılamadı. qaac'ın doğru kurulduğundan emin olun.",
+        "en": "'{binary}' could not be executed. Make sure qaac is installed correctly.",
+    },
+    "err_qaac_timeout": {
+        "tr": "qaac kodlaması zaman aşımına uğradı (>{timeout} sn)",
+        "en": "qaac encoding timed out (>{timeout}s)",
+    },
+    "err_qaac_failed": {
+        "tr": "qaac kodlaması başarısız (çıkış kodu {code}):\n{detail}",
+        "en": "qaac encoding failed (exit code {code}):\n{detail}",
     },
     "log_deew_done": {
         "tr": "✓ Deew encoding tamamlandı → {name}",
