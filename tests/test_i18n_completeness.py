@@ -81,16 +81,33 @@ def test_every_translation_actually_formats() -> None:
 
 
 def test_no_user_facing_string_bypasses_the_table() -> None:
-    """A hard-coded English message shows through in the Turkish UI."""
+    """A hard-coded message shows through in whichever language it is not in.
+
+    Both directions have happened here: the pipeline logged English into a
+    Turkish log box, and deew's progress said "Deew komutu:" in the English one.
+    So this looks at everything that reaches the user — widget captions, dialog
+    messages, and anything handed to a log or progress callback.
+    """
+    literal = r'"([A-Za-zÇĞİÖŞÜçğıöşü][^"]{8,})"'
+    patterns = [
+        re.compile(rf"(?:text|message)\s*=\s*f?{literal}"),
+        re.compile(rf"(?:progress_callback|log|self\._log)\(\s*f?{literal}"),
+    ]
+    # Prefixes that label another tool's own output. The line they carry is
+    # whatever deew printed, so translating the tag would be misleading rather
+    # than helpful — it names the source, it is not a message of ours.
+    allowed = {"deew: {line}", "deew stderr: {line}"}
+
     offenders: list[str] = []
-    pattern = re.compile(r'(?:text|message)\s*=\s*"([A-Z][a-z]+ [^"]{6,})"')
     for path in source_files():
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if "t(" in line:
                 continue
-            match = pattern.search(line)
-            if match:
-                offenders.append(f"{path.name}:{number}: {match.group(1)!r}")
+            for pattern in patterns:
+                match = pattern.search(line)
+                if match and match.group(1) not in allowed:
+                    offenders.append(f"{path.name}:{number}: {match.group(1)!r}")
+                    break
     assert not offenders, f"çeviri tablosunu atlayan metin: {offenders}"
 
 

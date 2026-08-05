@@ -2232,7 +2232,9 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
                 sync_info,
                 cancel_event=self._cancel_event,
             )
-            self._log(f"FPS: {fps_summary}")
+            # The summary now opens with "FPS conversion:" of its own, so the
+            # old "FPS:" prefix here printed the words twice.
+            self._log(fps_summary)
             self._log_timing(t("log_fps_applying", name=fps_conversion.display_name), fps_started)
             effective_sync_path = fps_tmp_path
             sync_info = self._ffmpeg.probe_audio(effective_sync_path)

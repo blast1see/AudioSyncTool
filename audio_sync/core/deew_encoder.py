@@ -422,7 +422,9 @@ class DeewEncoder:
         )
 
         if progress_callback:
-            progress_callback(f"Deew komutu: {' '.join(shlex.quote(c) for c in cmd)}")
+            progress_callback(
+                t("log_command", cmd=" ".join(shlex.quote(c) for c in cmd))
+            )
 
         # Komutu çalıştır
         result = self._run_deew(
@@ -463,7 +465,9 @@ class DeewEncoder:
         )
 
         if progress_callback:
-            progress_callback(f"Deew encoding completed: {os.path.basename(output_path)}")
+            progress_callback(
+                t("log_deew_done", name=os.path.basename(output_path))
+            )
 
         return output_path
 
@@ -745,7 +749,7 @@ def encode_wav_with_deew(
 
     try:
         if progress_callback:
-            progress_callback(f"Starting {fmt.display_name} encoding with Deew…")
+            progress_callback(t("log_deew_start", fmt=fmt.display_name))
 
         # Encoding
         encoded_path = encoder.encode(
@@ -768,17 +772,19 @@ def encode_wav_with_deew(
         _shutil.move(encoded_path, final_output_path)
 
         if progress_callback:
-            progress_callback(f"Output file moved: {os.path.basename(final_output_path)}")
+            progress_callback(
+                t("log_deew_output_moved", name=os.path.basename(final_output_path))
+            )
 
         # Ara WAV dosyasını sil
         if delete_wav and os.path.isfile(input_wav):
             try:
                 os.remove(input_wav)
                 if progress_callback:
-                    progress_callback("Intermediate WAV file deleted.")
+                    progress_callback(t("log_intermediate_wav_deleted"))
             except OSError:
                 if progress_callback:
-                    progress_callback("Warning: Could not delete intermediate WAV file.")
+                    progress_callback(t("log_intermediate_wav_delete_fail"))
 
         return final_output_path
 
