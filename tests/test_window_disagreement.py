@@ -12,7 +12,6 @@ disagreed by 200 ms and the produced file was seconds out at the ends.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from audio_sync.config import SYNC_CONFIG
 from audio_sync.core.analyzer import AudioAnalyzer
@@ -61,30 +60,7 @@ def test_spread_is_zero_when_nothing_validated() -> None:
     assert result_for([]).windows_disagree_ms == 0.0
 
 
-@pytest.mark.gui
-def test_scatter_downgrades_the_readout_even_at_a_good_score() -> None:
-    """A confident-looking score must not present a result that cannot hold."""
-    from audio_sync.i18n import t
-    from audio_sync.ui.app import AudioSyncApp
-
-    try:
-        app = AudioSyncApp()
-    except Exception as exc:  # pragma: no cover - environment problem
-        pytest.skip(f"GUI unavailable: {exc}")
-
-    try:
-        app.withdraw()
-        scattered = AnalysisResult(
-            delay_ms=32873.0, coarse_ms=32672.0, confidence=4.5,
-            total_segments=56, used_segments=31, drift_ms_per_min=-2.0,
-            skip_fallback=False, residual_mad_ms=200.0,
-        )
-        app._display_analysis_result(scattered)
-        app.update()
-
-        detail = app._readout_detail.cget("text")
-        assert t("confidence_weak") in detail
-        assert t("confidence_strong") not in detail
-        assert "200" in detail
-    finally:
-        app.destroy()
+# The UI side of this lives in tests/test_gui_smoke.py, which drives a single
+# shared Tk root — creating a second root in the same interpreter is unreliable
+# on some Tcl installations, which is why that module has one window for the
+# whole file.

@@ -113,6 +113,30 @@ def test_cancel_is_hidden_until_there_is_work_to_cancel(app) -> None:
     assert app.cancel_btn.winfo_manager() == ""
 
 
+def test_scatter_downgrades_the_readout_even_at_a_good_score(app) -> None:
+    """A confident-looking score must not present a result that cannot hold.
+
+    Measured on a 132-minute pair: confidence 4.5, and the produced file was
+    seconds out at the ends because the windows disagreed by 200 ms.
+    """
+    from audio_sync.core.models import AnalysisResult
+
+    scattered = AnalysisResult(
+        delay_ms=32873.0, coarse_ms=32672.0, confidence=4.5,
+        total_segments=56, used_segments=31, drift_ms_per_min=-2.0,
+        skip_fallback=False, residual_mad_ms=200.0,
+    )
+    app._display_analysis_result(scattered)
+    app.update()
+
+    detail = app._readout_detail.cget("text")
+    assert t("confidence_weak") in detail
+    assert t("confidence_strong") not in detail
+    assert "200" in detail
+
+    app._show_readout(None)
+
+
 def test_readout_shows_signed_milliseconds_and_clears(app) -> None:
     app._show_readout(-2498.0, detail="sync audio is behind")
     app.update_idletasks()
