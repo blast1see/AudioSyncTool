@@ -907,10 +907,11 @@ class FFmpegWrapper:
 
         cmd.append(output_path)
 
+        # Diğer formatlarla aynı biçim: kodek ve bitrate — komut satırı ve
+        # geçici dosya adı kullanıcıya bir şey anlatmıyordu.
         cmd_summary = (
-            f"ffmpeg … -acodec {codec} -b:a {bitrate}k"
-            f"{f' -ac {channels}' if channels else ''}"
-            f" → {os.path.basename(output_path)}"
+            f"{'AC3' if codec == 'ac3' else 'E-AC3'} {bitrate} kbps"
+            f"{f' ({channels}ch)' if channels else ''}"
         )
 
         result = self._run_command(
