@@ -1539,14 +1539,14 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             if not ok:
                 messagebox.showwarning(
                     t("tool_paths_title"),
-                    "Failed to save tool paths to disk.",
+                    t("tool_paths_save_failed"),
                 )
 
         btn_frame = tk.Frame(dialog, bg=THEME.bg)
         btn_frame.pack(fill="x", padx=20, pady=(8, 16))
 
         tk.Button(
-            btn_frame, text=t("tool_paths_saved").replace(".", ""),
+            btn_frame, text=t("btn_save"),
             font=FONTS.button, fg=THEME.bg, bg=THEME.accent,
             activebackground=THEME.accent, activeforeground=THEME.bg,
             relief="flat", padx=20, pady=8, cursor="hand2",
@@ -1554,7 +1554,7 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         ).pack(side="right")
 
         tk.Button(
-            btn_frame, text=t("cancel"),
+            btn_frame, text=t("btn_cancel"),
             font=FONTS.button, fg=THEME.text, bg=THEME.card,
             activebackground=THEME.card, activeforeground=THEME.text,
             relief="flat", padx=20, pady=8, cursor="hand2",
