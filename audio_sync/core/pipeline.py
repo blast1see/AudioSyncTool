@@ -35,6 +35,7 @@ from audio_sync.core.models import (
     OutputSampleRate,
     UnsafeOutputPathError,
 )
+from audio_sync.i18n import t
 from audio_sync.utils import validate_file
 
 if TYPE_CHECKING:
@@ -131,7 +132,7 @@ class SyncPipeline:
                 dir=output_path.parent,
             ) as work_dir_text:
                 work_dir = Path(work_dir_text)
-                log("Reading audio metadata…")
+                log(t("pipe_reading_metadata"))
                 progress(5)
                 source_info = self._ffmpeg.probe_audio(request.source_path)
                 sync_info = self._ffmpeg.probe_audio(request.sync_path)
@@ -144,7 +145,7 @@ class SyncPipeline:
 
                 effective_sync = request.sync_path
                 if request.fps_conversion is not None:
-                    log(f"Applying FPS conversion: {request.fps_conversion.display_name}")
+                    log(t("pipe_fps_applying", name=request.fps_conversion.display_name))
                     progress(15)
                     fps_path = work_dir / "fps-converted.wav"
                     self._ffmpeg.apply_fps_conversion(
@@ -157,7 +158,7 @@ class SyncPipeline:
                     effective_sync = str(fps_path)
                     sync_info = self._ffmpeg.probe_audio(effective_sync)
 
-                log("Decoding analysis PCM…")
+                log(t("pipe_decoding"))
                 progress(25)
                 source_rate, source_pcm, _ = self._ffmpeg.decode_mono_pcm_to_file(
                     request.source_path,
@@ -174,7 +175,7 @@ class SyncPipeline:
                 )
                 self._check_cancelled(cancel_event)
 
-                log("Analyzing delay…")
+                log(t("pipe_analyzing"))
                 progress(48)
                 analysis = self._get_analyzer().calculate_delay_from_pcm_files(
                     source_rate,
@@ -198,10 +199,7 @@ class SyncPipeline:
                         # before anything tries to measure around it — worth a
                         # second analysis pass, which only happens when a
                         # mismatch was actually found.
-                        log(
-                            f"Detected a {detected.display_name} frame-rate "
-                            f"mismatch; converting and re-analyzing."
-                        )
+                        log(t("pipe_fps_detected", name=detected.display_name))
                         progress(52)
                         fps_path = work_dir / "auto-fps-converted.wav"
                         self._ffmpeg.apply_fps_conversion(
@@ -240,18 +238,20 @@ class SyncPipeline:
                     enabled=request.correct_steps,
                 )
                 if regions_to_apply:
-                    log(
-                        f"Offset steps {analysis.step_span_ms:.0f} ms across "
-                        f"{len(regions_to_apply)} regions; splicing instead of "
-                        f"applying one delay:"
-                    )
+                    log(t(
+                        "pipe_steps_header",
+                        span=analysis.step_span_ms,
+                        count=len(regions_to_apply),
+                    ))
                     for region in regions_to_apply:
                         start, end = region.bounds_in_minutes()
-                        log(
-                            f"   {start:5.1f} min – {end}: "
-                            f"{region.lag_ms:+.1f} ms "
-                            f"({region.window_count} windows)"
-                        )
+                        log(t(
+                            "pipe_steps_region",
+                            start=start,
+                            end=end,
+                            lag=region.lag_ms,
+                            windows=region.window_count,
+                        ))
 
                 # A frame-rate mismatch is a fixed-ratio speed error, so it shows
                 # up as a very specific slope.  Naming it turns "your audio
@@ -261,22 +261,15 @@ class SyncPipeline:
                 if applied_fps is None and not request.auto_fps_conversion:
                     suspected = self.suspected_fps_conversion(analysis)
                     if suspected is not None:
-                        log(
-                            f"These two tracks look like the same content at "
-                            f"different frame rates ({suspected.display_name}). "
-                            f"Enable that FPS conversion and run again — it "
-                            f"removes the speed difference before the analysis "
-                            f"instead of chasing it afterwards."
-                        )
+                        log(t(
+                            "pipe_fps_suggestion", name=suspected.display_name
+                        ))
 
                 if analysis.windows_disagree_ms >= self._config.window_disagreement_warn_ms:
-                    log(
-                        f"Warning: the validated windows disagree by about "
-                        f"{analysis.windows_disagree_ms:.0f} ms. The sources are "
-                        f"probably different cuts, or drift further apart than "
-                        f"the search can follow — one delay will not hold across "
-                        f"the whole file."
-                    )
+                    log(t(
+                        "pipe_windows_disagree",
+                        spread=analysis.windows_disagree_ms,
+                    ))
 
                 drift_to_apply, delay_to_apply = self.resolve_drift_correction(
                     analysis,
@@ -284,23 +277,22 @@ class SyncPipeline:
                     config=self._config,
                 )
                 if drift_to_apply is not None:
-                    log(
-                        f"Correcting progressive drift of "
-                        f"{drift_to_apply:+.2f} ms/min "
-                        f"(fit R²={analysis.drift_r2:.2f})"
-                    )
+                    log(t(
+                        "pipe_drift_correcting",
+                        drift=drift_to_apply,
+                        r2=analysis.drift_r2,
+                    ))
                 elif analysis.drift_ms_per_min is not None and abs(
                     analysis.drift_ms_per_min
                 ) >= self._config.drift_warning_threshold:
-                    log(
-                        f"Warning: drift of {analysis.drift_ms_per_min:+.2f} ms/min "
-                        f"detected but not corrected; a single offset cannot hold "
-                        f"sync across the whole file."
-                    )
+                    log(t(
+                        "pipe_drift_warning",
+                        drift=analysis.drift_ms_per_min,
+                    ))
 
                 needs_encoding = request.encoding.pipeline is not EncodingPipeline.NONE
                 synced_wav = work_dir / "synchronized.wav" if needs_encoding else staged_output
-                log("Applying synchronization…")
+                log(t("pipe_applying_sync"))
                 progress(60)
                 sync_summary = self._ffmpeg.apply_sync(
                     request.source_path,
@@ -318,7 +310,7 @@ class SyncPipeline:
 
                 encoding_summary: str | None = None
                 if needs_encoding:
-                    log("Encoding final output…")
+                    log(t("pipe_encoding"))
                     progress(78)
                     try:
                         encoding_summary = self._encode(
@@ -339,11 +331,12 @@ class SyncPipeline:
                         # feature.  Say how big it is, or it sits on the disk
                         # unnoticed until something runs out of space.
                         raise EncodingError(
-                            f"Final encoding failed: {exc}\n"
-                            f"The synchronized audio was kept so you do not have "
-                            f"to analyze again — delete it once you no longer need "
-                            f"it:\n"
-                            f"  {fallback}  ({self._describe_size(fallback)})",
+                            t(
+                                "err_encoding_failed",
+                                error=exc,
+                                path=fallback,
+                                size=self._describe_size(fallback),
+                            ),
                             fallback_path=str(fallback),
                         ) from exc
                 else:
@@ -353,7 +346,7 @@ class SyncPipeline:
                 self._check_cancelled(cancel_event)
                 os.replace(staged_output, output_path)
                 progress(100)
-                log(f"Completed: {output_path.name}")
+                log(t("pipe_completed", name=output_path.name))
 
                 return SyncOutcome(
                     output_path=str(output_path),
@@ -389,16 +382,10 @@ class SyncPipeline:
         after = converted.windows_disagree_ms
 
         if after < before or (after == before and converted.used_segments > original.used_segments):
-            log(
-                f"FPS conversion applied: window disagreement "
-                f"{before:.0f} ms → {after:.0f} ms."
-            )
+            log(t("pipe_fps_kept", before=before, after=after))
             return converted, conversion
 
-        log(
-            f"FPS conversion did not improve the reading "
-            f"({before:.0f} ms → {after:.0f} ms); keeping the original audio."
-        )
+        log(t("pipe_fps_rejected", before=before, after=after))
         return original, None
 
     @staticmethod

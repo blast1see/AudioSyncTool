@@ -32,6 +32,7 @@ from audio_sync.config import (
     which_on_path,
 )
 from audio_sync.core.process_runner import run_text_process
+from audio_sync.i18n import t
 
 
 @dataclass(frozen=True)
@@ -258,16 +259,8 @@ def describe_deew_failure(output: str) -> str | None:
         return None
 
     locations = deew_config_locations()
-    where = "\n".join(f"  {path}" for path in locations) or "  (config not found)"
-    return (
-        "Deew crashed while drawing its start-up logo: this system's code page "
-        "cannot represent the characters it uses, so deew exits before encoding "
-        "anything.\n"
-        "Fix it by setting the logo off in deew's config:\n"
-        f"{where}\n"
-        "Change the line 'logo = 1' to 'logo = 0', then run the sync again.\n"
-        "The synchronized WAV has been kept, so nothing needs re-analyzing."
-    )
+    where = "\n".join(f"  {path}" for path in locations) or "  config.toml"
+    return t("err_deew_logo", paths=where)
 
 
 def reset_deew_probe_cache() -> None:
@@ -508,8 +501,11 @@ class DeewEncoder:
 
         if progress_callback:
             progress_callback(
-                f"Ignoring the {downmix.display_name} downmix: the track already "
-                f"has {info.channels} channel(s), so there is nothing to fold down."
+                t(
+                    "pipe_downmix_ignored",
+                    name=downmix.display_name,
+                    channels=info.channels,
+                )
             )
         return None
 

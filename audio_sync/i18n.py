@@ -273,12 +273,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "Zaman kaymasını (drift) otomatik düzelt",
         "en": "Correct progressive drift automatically",
     },
-    "correct_drift_note": {
-        "tr": "Ölçülen kayma güvenilirse hedef ses yeniden zamanlanır; "
-              "aksi halde yalnızca sabit gecikme uygulanır.",
-        "en": "Retimes the target track when the measured drift is reliable; "
-              "otherwise only the constant offset is applied.",
-    },
     "channel": {
         "tr": "KANAL",
         "en": "CHANNEL",
@@ -885,9 +879,140 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tr": "Araç yolları kaydedildi.",
         "en": "Tool paths saved.",
     },
+    # The dialog's own buttons.  These used to borrow the *result* message
+    # ("Tool paths saved.") as the button label, so a button that had not been
+    # pressed yet announced something in the past tense.
+    "btn_save": {
+        "tr": "Kaydet",
+        "en": "Save",
+    },
+    "tool_paths_save_failed": {
+        "tr": "Araç yolları diske kaydedilemedi.",
+        "en": "Failed to save tool paths to disk.",
+    },
     "tool_paths_button": {
         "tr": "⚙ Araç Yolları",
         "en": "⚙ Tool Paths",
+    },
+
+    # ── Pipeline (log kutusuna yazılan iş akışı mesajları) ──
+    #
+    # Bunlar arayüzün log kutusunda, arayüzün kendi Türkçe mesajlarıyla yan yana
+    # görünür.  Önceden hepsi koda gömülü İngilizceydi, yani Türkçe arayüzde
+    # karışık bir log çıkıyordu.
+    "pipe_reading_metadata": {
+        "tr": "Ses meta verisi okunuyor…",
+        "en": "Reading audio metadata…",
+    },
+    "pipe_decoding": {
+        "tr": "Analiz için ses çözülüyor…",
+        "en": "Decoding analysis PCM…",
+    },
+    "pipe_analyzing": {
+        "tr": "Gecikme analiz ediliyor…",
+        "en": "Analyzing delay…",
+    },
+    "pipe_applying_sync": {
+        "tr": "Senkronizasyon uygulanıyor…",
+        "en": "Applying synchronization…",
+    },
+    "pipe_encoding": {
+        "tr": "Çıktı kodlanıyor…",
+        "en": "Encoding final output…",
+    },
+    "pipe_completed": {
+        "tr": "Tamamlandı: {name}",
+        "en": "Completed: {name}",
+    },
+    "pipe_fps_applying": {
+        "tr": "FPS dönüşümü uygulanıyor: {name}",
+        "en": "Applying FPS conversion: {name}",
+    },
+    "pipe_fps_detected": {
+        "tr": "{name} kare hızı uyuşmazlığı bulundu; dönüştürülüp yeniden "
+              "analiz ediliyor.",
+        "en": "Detected a {name} frame-rate mismatch; converting and "
+              "re-analyzing.",
+    },
+    "pipe_fps_kept": {
+        "tr": "FPS dönüşümü uygulandı: pencere uyuşmazlığı {before:.0f} ms → "
+              "{after:.0f} ms.",
+        "en": "FPS conversion applied: window disagreement {before:.0f} ms → "
+              "{after:.0f} ms.",
+    },
+    "pipe_fps_rejected": {
+        "tr": "FPS dönüşümü ölçümü iyileştirmedi ({before:.0f} ms → "
+              "{after:.0f} ms); orijinal ses korunuyor.",
+        "en": "FPS conversion did not improve the reading ({before:.0f} ms → "
+              "{after:.0f} ms); keeping the original audio.",
+    },
+    "pipe_fps_suggestion": {
+        "tr": "Bu iki parça farklı kare hızlarındaki aynı içerik gibi görünüyor "
+              "({name}). O FPS dönüşümünü açıp yeniden çalıştırın — hız farkını "
+              "analizden sonra kovalamak yerine önce ortadan kaldırır.",
+        "en": "These two tracks look like the same content at different frame "
+              "rates ({name}). Enable that FPS conversion and run again — it "
+              "removes the speed difference before the analysis instead of "
+              "chasing it afterwards.",
+    },
+    "pipe_steps_header": {
+        "tr": "Ofset {span:.0f} ms sıçrıyor, {count} bölge; tek gecikme yerine "
+              "parça birleştiriliyor:",
+        "en": "Offset steps {span:.0f} ms across {count} regions; splicing "
+              "instead of applying one delay:",
+    },
+    "pipe_steps_region": {
+        "tr": "   {start:5.1f} dk – {end}: {lag:+.1f} ms ({windows} pencere)",
+        "en": "   {start:5.1f} min – {end}: {lag:+.1f} ms ({windows} windows)",
+    },
+    "pipe_windows_disagree": {
+        "tr": "Uyarı: doğrulanan pencereler yaklaşık {spread:.0f} ms ayrışıyor. "
+              "Kaynaklar muhtemelen farklı kurgular ya da aramanın izleyebileceğinden "
+              "fazla uzaklaşıyorlar — tek bir gecikme tüm dosyada geçerli olmaz.",
+        "en": "Warning: the validated windows disagree by about {spread:.0f} ms. "
+              "The sources are probably different cuts, or drift further apart "
+              "than the search can follow — one delay will not hold across the "
+              "whole file.",
+    },
+    "pipe_drift_correcting": {
+        "tr": "İlerleyen kayma düzeltiliyor: {drift:+.2f} ms/dk (uyum R²={r2:.2f})",
+        "en": "Correcting progressive drift of {drift:+.2f} ms/min (fit R²={r2:.2f})",
+    },
+    "pipe_drift_warning": {
+        "tr": "Uyarı: {drift:+.2f} ms/dk kayma var ama düzeltilmedi; tek bir ofset "
+              "tüm dosyada senkronu tutamaz.",
+        "en": "Warning: drift of {drift:+.2f} ms/min detected but not corrected; "
+              "a single offset cannot hold sync across the whole file.",
+    },
+    "pipe_downmix_ignored": {
+        "tr": "{name} downmix yok sayılıyor: parça zaten {channels} kanallı, "
+              "indirilecek bir şey yok.",
+        "en": "Ignoring the {name} downmix: the track already has {channels} "
+              "channel(s), so there is nothing to fold down.",
+    },
+    "err_encoding_failed": {
+        "tr": "Son kodlama başarısız: {error}\n"
+              "Analizi tekrarlamak zorunda kalmayın diye senkronize ses saklandı — "
+              "ihtiyacınız kalmayınca silin:\n  {path}  ({size})",
+        "en": "Final encoding failed: {error}\n"
+              "The synchronized audio was kept so you do not have to analyze "
+              "again — delete it once you no longer need it:\n  {path}  ({size})",
+    },
+    "err_deew_logo": {
+        "tr": "Deew, açılış logosunu çizerken çöktü: bu sistemin kod sayfası "
+              "logonun kullandığı karakterleri gösteremiyor, bu yüzden deew hiçbir "
+              "şey kodlamadan çıkıyor.\n"
+              "Deew'in yapılandırmasında logoyu kapatarak düzeltin:\n{paths}\n"
+              "'logo = 1' satırını 'logo = 0' yapın, sonra senkronu tekrar "
+              "çalıştırın.\n"
+              "Senkronize WAV saklandı, yeniden analiz gerekmiyor.",
+        "en": "Deew crashed while drawing its start-up logo: this system's code "
+              "page cannot represent the characters it uses, so deew exits before "
+              "encoding anything.\n"
+              "Fix it by setting the logo off in deew's config:\n{paths}\n"
+              "Change the line 'logo = 1' to 'logo = 0', then run the sync "
+              "again.\n"
+              "The synchronized WAV has been kept, so nothing needs re-analyzing.",
     },
 }
 
