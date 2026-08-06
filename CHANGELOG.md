@@ -6,6 +6,28 @@
 
 ## English
 
+### [2.4.1] - 2026-08-06
+
+An interface audit. v2.4.0 rebuilt the window and added several panels, and the
+translation table did not keep pace with them — this release closes that gap and
+adds tests that fail when it opens again.
+
+#### Fixed
+- **Five dropdowns showed the internal value instead of the option's name.** The DRC profile read `music_light`, the qaac mode read `--tvbr`, the deew format read `ddp`, the FFmpeg format read `aac`, and the pipeline selector read `none`. Tk ties an `OptionMenu`'s caption to its variable, so displaying a name meant giving the button its own display variable while the original keeps the value every caller reads — the enums have carried proper display names all along, and the pipeline selector even built a list of (value, label) pairs and then discarded the labels. A trace drives the caption, so a value assigned from code shows through too, and the menus rebuild on a language change because some labels are translated.
+- **The pipeline logged in English into a Turkish log box.** All sixteen of its progress messages, and deew's, bypassed the translation table; a language switch left the running commentary in whichever language it happened to be written in. Both now go through `t()`.
+- **A missing key rendered as the key itself.** `t()` returns its argument when it cannot find a translation, so an undefined key became the caption — one button read `cancel`. The keys that reached the user without a definition are now defined, and a test fails on any `t()` call whose key is not in the table.
+- **31 translation entries no longer had a use.** Most were left behind by features that changed shape, but the same audit found the opposite case — deew's start and completion messages were dead because the code had quietly replaced them with hard-coded English, which is invisible until someone switches language and looks exactly like harmless dead weight until you check. The dead entries are gone, and a test fails when an entry stops being referenced.
+- **The AC3/E-AC3 encode summary printed a command line.** It logged a partial ffmpeg invocation ending in the staged temporary filename; the other formats report `AAC 192 kbps`, and this one now reads `AC3 448 kbps`.
+
+#### Added
+- `tests/test_i18n_completeness.py` — every key present in both languages, every key used in code defined, every defined key referenced, placeholders matching across languages, every string formattable, and nothing user-facing bypassing the table.
+- Two GUI tests covering the dropdowns: the caption is a label rather than the value even after a code-side assignment, and it follows a language change without losing the selection.
+
+#### Verified
+- All twelve encoding pipelines re-run end to end (FFmpeg AAC / FLAC-16 / FLAC-24 / Opus / AC3 / E-AC3 / 1-channel, deew DD and DDP, qaac TVBR, plain WAV): correct codec, channel count and duration, residual offset −7 to −13 ms.
+- Both languages swept widget by widget — no raw translation key and no raw internal value reaches the screen.
+- Layout geometry is unchanged from v2.4.0 (1236 px content width; per-panel heights identical).
+
 ### [2.4.0] - 2026-08-05
 
 Validated end to end against eight feature-length film pairs (Turkish dubs
@@ -217,6 +239,28 @@ independent correlation that shares no code with the analyzer.
 ---
 
 ## Turkce
+
+### [2.4.1] - 2026-08-06
+
+Bir arayuz denetimi. v2.4.0 pencereyi bastan kurdu ve birkac panel ekledi;
+ceviri tablosu bunlara yetisemedi. Bu surum o bosluğu kapatiyor ve bosluk yeniden
+acildiginda basarisiz olacak testler ekliyor.
+
+#### Duzeltildi
+- **Bes acilir menu, secenegin adi yerine ic degeri gosteriyordu.** DRC profili `music_light`, qaac modu `--tvbr`, deew formati `ddp`, FFmpeg formati `aac`, kodlama yontemi ise `none` yaziyordu. Tk bir `OptionMenu`'nun buton yazisini degiskenine baglar; bu yuzden ad gosterebilmek icin butona kendi goruntu degiskeni verildi, orijinal degisken her cagiranin okudugu degeri tutmaya devam ediyor — enum'lar bu adlari en bastan tasiyordu, kodlama yontemi secicisi (deger, etiket) ciftlerinden bir liste bile kuruyor sonra etiketleri atiyordu. Yaziyi bir `trace` suruyor, boylece koddan atanan bir deger de dogru etiketi gosteriyor; bazi etiketler cevrildigi icin menuler dil degisiminde yeniden kuruluyor.
+- **Sureç, Turkce log kutusuna Ingilizce yaziyordu.** On alti ilerleme mesajinin tamami ve deew'inkiler ceviri tablosunu atliyordu; dil degistirmek, akan aciklamalari yazildiklari dilde birakiyordu. Ikisi de artik `t()` uzerinden geciyor.
+- **Eksik bir anahtar, anahtarin kendisi olarak goruntuleniyordu.** `t()` ceviri bulamazsa argumanini dondurur; bu yuzden tanimsiz bir anahtar dogrudan buton yazisi oluyordu — bir buton `cancel` yaziyordu. Kullaniciya ulasip da tanimsiz olan anahtarlar tanimlandi ve artik tabloda olmayan bir anahtarla yapilan her `t()` cagrisinda bir test basarisiz oluyor.
+- **31 ceviri girdisinin artik bir kullanimi yoktu.** Cogu, sekil degistiren ozelliklerden arta kalmisti; ama ayni denetim bunun tersini de buldu — deew'in baslangic ve bitis mesajlari oluydu, cunku kod onlarin yerine sessizce sabit Ingilizce metin koymustu. Bu, biri dili degistirene kadar gorunmez ve kontrol edene kadar zararsiz olu agirliga birebir benzer. Olu girdiler kaldirildi ve bir girdi artik hicbir yerden erisilmez hale geldiginde test basarisiz oluyor.
+- **AC3/E-AC3 kodlama ozeti komut satiri yaziyordu.** Loga, geçici dosya adiyla biten eksik bir ffmpeg cagrisi dusuyordu; diger formatlar `AAC 192 kbps` diyor, bu da artik `AC3 448 kbps` diyor.
+
+#### Eklendi
+- `tests/test_i18n_completeness.py` — her anahtar iki dilde de var mi, kodda kullanilan her anahtar tanimli mi, tanimli her anahtara erisiliyor mu, yer tutucular diller arasinda uyusuyor mu, her metin bicimlendirilebiliyor mu ve kullaniciya ulasan hicbir metin tabloyu atliyor mu.
+- Acilir menuler icin iki GUI testi: buton yazisi, koddan yapilan bir atamadan sonra bile deger degil etiket oluyor ve dil degisiminde secimi kaybetmeden onu izliyor.
+
+#### Dogrulandi
+- On iki kodlama hattinin tamami uctan uca yeniden calistirildi (FFmpeg AAC / FLAC-16 / FLAC-24 / Opus / AC3 / E-AC3 / 1-kanal, deew DD ve DDP, qaac TVBR, duz WAV): dogru kodek, kanal sayisi ve sure, kalinti gecikme −7 ile −13 ms.
+- Iki dil de widget widget tarandi — ekrana ne ham ceviri anahtari ne de ham ic deger ulasiyor.
+- Yerlesim olculeri v2.4.0 ile ayni (1236 px icerik genisligi; panel basina yukseklikler birebir).
 
 ### [2.4.0] - 2026-08-05
 
