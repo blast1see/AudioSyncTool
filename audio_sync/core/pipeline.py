@@ -10,6 +10,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
+import numpy as np
+
 from audio_sync.config import (
     SYNC_CONFIG,
     DeewConfig,
@@ -30,6 +32,8 @@ from audio_sync.core.models import (
     AnalysisResult,
     AudioInfo,
     EncodingError,
+    MatchVerdict,
+    NoMatchError,
     OffsetRegion,
     OperationCancelledError,
     OutputSampleRate,
@@ -73,6 +77,10 @@ class SyncRequest:
     correct_drift: bool = True
     correct_steps: bool = True
     auto_fps_conversion: bool = True
+    # Writing a track from a measurement the analyzer itself rejects produces a
+    # file that is silently minutes out of sync and carries no trace of the
+    # mistake.  The caller has to say so explicitly.
+    allow_no_match: bool = False
 
 
 @dataclass(frozen=True)
@@ -89,6 +97,11 @@ class SyncOutcome:
     drift_applied_ms_per_min: float | None = None
     offset_regions_applied: tuple[OffsetRegion, ...] = ()
     fps_conversion_applied: FpsConversion | None = None
+    # Measured on the file that was actually written, not predicted from the
+    # analysis: how far it still sits from the reference, and over how many
+    # independent probes.  ``None`` when the check could not run.
+    verified_residual_ms: float | None = None
+    verified_probes: int = 0
 
 
 class SyncPipeline:
@@ -233,6 +246,19 @@ class SyncPipeline:
                             sync_info = self._ffmpeg.probe_audio(effective_sync)
                         self._check_cancelled(cancel_event)
 
+                self._report_verdict(analysis, log)
+                if (
+                    analysis.verdict is MatchVerdict.NO_MATCH
+                    and not request.allow_no_match
+                ):
+                    raise NoMatchError(
+                        t(
+                            "err_no_match",
+                            delay=analysis.delay_ms,
+                            confidence=analysis.confidence,
+                        )
+                    )
+
                 regions_to_apply = self.resolve_offset_regions(
                     analysis,
                     enabled=request.correct_steps,
@@ -345,6 +371,15 @@ class SyncPipeline:
 
                 self._check_cancelled(cancel_event)
                 os.replace(staged_output, output_path)
+                progress(95)
+
+                residual, probes = self._verify_output(
+                    request.source_path,
+                    str(output_path),
+                    log=log,
+                    cancel_event=cancel_event,
+                )
+
                 progress(100)
                 log(t("pipe_completed", name=output_path.name))
 
@@ -359,9 +394,107 @@ class SyncPipeline:
                     drift_applied_ms_per_min=drift_to_apply,
                     offset_regions_applied=regions_to_apply,
                     fps_conversion_applied=applied_fps,
+                    verified_residual_ms=residual,
+                    verified_probes=probes,
                 )
         finally:
             staged_output.unlink(missing_ok=True)
+
+    def _verify_output(
+        self,
+        source_path: str,
+        output_path: str,
+        *,
+        log: LogCallback,
+        cancel_event: threading.Event | None = None,
+    ) -> tuple[float | None, int]:
+        """Measure the file that was written against the reference it targets.
+
+        Every stage before this one reports what it *intended* to do.  Nothing
+        reported what came out, so a wrong measurement, a filter that silently
+        did nothing, or an encoder that shifted the track by its own lookahead
+        all produced a confident success message and a file nobody had checked.
+
+        A few short probes at matching timestamps answer it directly: a track
+        that landed reports a residual near zero, and one that did not says so
+        in milliseconds.
+        """
+        cfg = self._config
+        if not cfg.verify_output_enabled or cfg.verify_probe_count < 1:
+            return None, 0
+
+        try:
+            duration = self._probe_duration_sec(output_path)
+            if duration <= cfg.verify_probe_sec * 2:
+                return None, 0
+
+            log(t("pipe_verifying"))
+            analyzer = self._get_analyzer()
+            rate = cfg.analysis_sample_rate
+            margin = min(duration * 0.05, 120.0)
+            positions = np.linspace(
+                margin,
+                max(margin, duration - margin - cfg.verify_probe_sec),
+                max(2, cfg.verify_probe_count),
+            )
+
+            measured: list[float] = []
+            for at_sec in positions:
+                if cancel_event is not None and cancel_event.is_set():
+                    return None, 0
+                reference = self._ffmpeg.decode_probe_mono_pcm(
+                    source_path, float(at_sec), cfg.verify_probe_sec,
+                    sample_rate=rate, cancel_event=cancel_event,
+                )
+                produced = self._ffmpeg.decode_probe_mono_pcm(
+                    output_path,
+                    float(at_sec) - cfg.verify_search_sec,
+                    cfg.verify_probe_sec + (2.0 * cfg.verify_search_sec),
+                    sample_rate=rate,
+                    cancel_event=cancel_event,
+                )
+                found = analyzer.residual_offset_ms(
+                    rate, reference, produced, search_sec=cfg.verify_search_sec,
+                )
+                if found is not None and found[1] >= cfg.verify_min_sharpness:
+                    measured.append(found[0])
+
+            if len(measured) < 2:
+                log(t("pipe_verify_inconclusive"))
+                return None, 0
+
+            residual = float(np.median(measured))
+            if abs(residual) >= cfg.verify_warn_ms:
+                log(t("pipe_verify_off", residual=residual, probes=len(measured)))
+            else:
+                log(t("pipe_verify_ok", residual=residual, probes=len(measured)))
+            return residual, len(measured)
+        except Exception:
+            # A check that fails must never fail the run it was checking.
+            log(t("pipe_verify_inconclusive"))
+            return None, 0
+
+    def _probe_duration_sec(self, path: str) -> float:
+        probe = self._ffmpeg.probe_duration_sec(path)
+        return float(probe or 0.0)
+
+    @staticmethod
+    def _report_verdict(analysis: AnalysisResult, log: LogCallback) -> None:
+        """Say out loud how much of the measurement can be trusted, and why."""
+        if analysis.verdict is MatchVerdict.NO_MATCH:
+            log(t("verdict_no_match"))
+        elif analysis.verdict is MatchVerdict.UNCERTAIN:
+            log(t("verdict_uncertain"))
+
+        for reason in analysis.verdict_reasons:
+            log(t("verdict_reason", reason=t(reason)))
+
+        if analysis.phat_probes:
+            log(t(
+                "verdict_sample_confirmed",
+                probes=analysis.phat_probes,
+                sharpness=analysis.phat_sharpness,
+            ))
 
     @staticmethod
     def _better_analysis(

@@ -403,6 +403,73 @@ class FFmpegWrapper:
 
         return analysis_rate, pcm
 
+    def probe_duration_sec(self, src: str) -> float | None:
+        """Playing time of ``src`` in seconds, or ``None`` if it cannot be read."""
+        cmd = [
+            resolve_tool("ffprobe"),
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=nw=1:nk=1",
+            src,
+        ]
+        try:
+            result = self._run_command(cmd, timeout=self._config.ffprobe_timeout_sec)
+        except (OSError, RuntimeError):
+            return None
+        if result.returncode != 0:
+            return None
+        try:
+            return float((result.stdout or "").strip())
+        except ValueError:
+            return None
+
+    def decode_probe_mono_pcm(
+        self,
+        src: str,
+        start_sec: float,
+        duration_sec: float,
+        *,
+        sample_rate: int | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> np.ndarray:
+        """Decode one short stretch of ``src`` to mono PCM.
+
+        Verifying a finished file must not cost as much as producing it, so the
+        check reads a few seconds from a few places rather than decoding two
+        feature films again.  ``-ss`` before ``-i`` seeks in the container
+        instead of decoding up to the mark, which keeps a probe into the middle
+        of a 30 GB remux down to a fraction of a second.
+        """
+        analysis_rate = sample_rate or self._config.analysis_sample_rate
+        cmd = [
+            resolve_tool("ffmpeg"),
+            "-v", "error",
+            "-nostdin",
+            "-ss", f"{max(0.0, start_sec):.3f}",
+            "-i", src,
+            "-t", f"{max(0.1, duration_sec):.3f}",
+            "-vn",
+            "-sn",
+            "-dn",
+            "-ar", str(analysis_rate),
+            "-ac", "1",
+            "-acodec", "pcm_s16le",
+            "-f", "s16le",
+            "-",
+        ]
+        result = self._run_binary_command(
+            cmd,
+            timeout=self._config.ffmpeg_timeout_sec,
+            cancel_event=cancel_event,
+        )
+        if result.returncode != 0:
+            return np.empty(0, dtype=np.int16)
+
+        pcm_bytes = result.stdout or b""
+        if len(pcm_bytes) % 2 != 0:
+            pcm_bytes = pcm_bytes[:-1]
+        return np.frombuffer(pcm_bytes, dtype=np.int16)
+
     def decode_mono_pcm_to_file(
         self,
         src: str,

@@ -13,7 +13,7 @@ from scipy.io import wavfile
 from scipy.signal import butter, correlate, fftconvolve, sosfilt, sosfiltfilt
 
 from audio_sync.config import SYNC_CONFIG, FpsConversion, SyncConfig
-from audio_sync.core.models import AnalysisResult, OffsetRegion
+from audio_sync.core.models import AnalysisResult, MatchVerdict, OffsetRegion
 
 ANALYSIS_DTYPE = np.float32
 _INT16_INFO = np.iinfo(np.int16)
@@ -321,7 +321,7 @@ class AudioAnalyzer:
             fingerprint_estimate=fingerprint_estimate,
         )
 
-        return self._locate_boundaries_in_audio(
+        result = self._locate_boundaries_in_audio(
             result,
             rate,
             src_pcm_path,
@@ -330,6 +330,481 @@ class AudioAnalyzer:
             src_peak=src_peak,
             sync_mean=sync_mean,
             sync_peak=sync_peak,
+        )
+
+        result = self._refine_result_with_phat(
+            result,
+            rate,
+            src_pcm_path,
+            sync_pcm_path,
+            src_samples=src_samples,
+            sync_samples=sync_samples,
+        )
+
+        return self.assess_match(
+            result,
+            src_duration_sec=src_samples / rate,
+            sync_duration_sec=sync_samples / rate,
+        )
+
+    # ── Örnek hassasiyetinde son rötuş ───────────────────────────────────
+
+    def _refine_result_with_phat(
+        self,
+        result: AnalysisResult,
+        rate: int,
+        src_pcm_path: str,
+        sync_pcm_path: str,
+        *,
+        src_samples: int,
+        sync_samples: int,
+    ) -> AnalysisResult:
+        """Re-measure the delay on the raw PCM, at sample resolution.
+
+        Everything up to here works on the 50 Hz feature grid, so the answer is
+        quantised to 20 ms before any averaging — and the coarse stage that
+        seeds it is quantised to 80 ms.  On a measured pair the tool reported
+        -10560 ms where the audio itself says -10527 ms: three quarters of a
+        frame, which is audible on dialogue.
+
+        A phase-transform correlation over the raw samples resolves 1/16000 s
+        and, because it shares no code and no assumptions with the envelope
+        correlation above, a refinement that lands on the same answer is also
+        independent corroboration that the answer is real.  A refinement that
+        finds nothing is itself evidence, so failure is recorded rather than
+        hidden.
+        """
+        cfg = self._config
+        if not cfg.phat_refine_enabled:
+            return result
+
+        duration = min(src_samples, sync_samples) / rate
+
+        # On a track whose clock runs fast the offset is a different number in
+        # every minute of the film, so probing every one of them against a
+        # single lag fails everywhere except the middle.  A 24 → 23.976 pair
+        # slides five seconds end to end and produced no usable probes at all.
+        # Where a slope has already been measured, each probe is aimed at the
+        # lag that slope predicts for its own position, and what comes back is
+        # the correction to the whole line.
+        # Only a slope worth acting on is worth aiming with.  A weak fit is a
+        # number, not a measurement: on a pair with no real drift the fit read
+        # 0.52 ms/min at an R² of 0.08, and aiming the probes along it pulled
+        # the answer 10 ms off a result that had been right.
+        drift_ms_per_sec = 0.0
+        if (
+            result.drift_ms_per_min is not None
+            and result.drift_intercept_ms is not None
+            and (result.drift_r2 or 0.0) >= cfg.drift_correction_min_r2
+        ):
+            drift_ms_per_sec = result.drift_ms_per_min / 60.0
+
+        refined = self._refine_lag_with_phat(
+            rate,
+            src_pcm_path,
+            sync_pcm_path,
+            lag_ms=result.delay_ms,
+            start_sec=0.0,
+            end_sec=duration,
+            src_samples=src_samples,
+            sync_samples=sync_samples,
+            drift_ms_per_sec=drift_ms_per_sec,
+            drift_origin_sec=self._drift_origin_sec(result, duration),
+        )
+
+        regions = result.offset_regions
+        if regions:
+            regions = tuple(
+                self._refine_region_with_phat(
+                    region,
+                    rate,
+                    src_pcm_path,
+                    sync_pcm_path,
+                    duration=duration,
+                    src_samples=src_samples,
+                    sync_samples=sync_samples,
+                )
+                for region in regions
+            )
+
+        if refined is None:
+            return replace(result, offset_regions=regions)
+
+        lag_ms, sharpness, probes = refined
+        correction = float(lag_ms) - result.delay_ms
+        intercept = result.drift_intercept_ms
+        # The slope stays as measured; only the line's height moves, so a drift
+        # correction anchored on the intercept inherits the same improvement.
+        if intercept is not None and drift_ms_per_sec:
+            intercept = float(intercept) + correction
+
+        return replace(
+            result,
+            delay_ms=float(lag_ms),
+            drift_intercept_ms=intercept,
+            offset_regions=regions,
+            phat_refined_ms=float(lag_ms),
+            phat_sharpness=float(sharpness),
+            phat_probes=int(probes),
+        )
+
+    @staticmethod
+    def _drift_origin_sec(result: AnalysisResult, duration: float) -> float:
+        """The time ``delay_ms`` describes, for a track whose offset slides.
+
+        ``delay_ms`` is a weighted median over the validated windows, so it is
+        the offset somewhere in the middle of the measured span rather than at
+        ``t=0``.  Probes have to be aimed relative to that same point or the
+        correction picks up half the film's drift as a constant error.
+        """
+        if result.drift_ms_per_min is None or result.drift_intercept_ms is None:
+            return 0.0
+        slope_per_sec = result.drift_ms_per_min / 60.0
+        if abs(slope_per_sec) < 1e-9:
+            return 0.0
+        origin = (result.delay_ms - result.drift_intercept_ms) / slope_per_sec
+        return float(min(max(origin, 0.0), max(duration, 0.0)))
+
+    def _refine_region_with_phat(
+        self,
+        region: OffsetRegion,
+        rate: int,
+        src_pcm_path: str,
+        sync_pcm_path: str,
+        *,
+        duration: float,
+        src_samples: int,
+        sync_samples: int,
+    ) -> OffsetRegion:
+        """Sharpen one region's offset using only the audio inside it."""
+        start = max(0.0, region.start_sec)
+        end = region.end_sec if math.isfinite(region.end_sec) else duration
+        end = min(end, duration)
+        if end - start < self._config.phat_refine_probe_sec * 2:
+            return region
+
+        refined = self._refine_lag_with_phat(
+            rate,
+            src_pcm_path,
+            sync_pcm_path,
+            lag_ms=region.lag_ms,
+            start_sec=start,
+            end_sec=end,
+            src_samples=src_samples,
+            sync_samples=sync_samples,
+        )
+        if refined is None:
+            return region
+        return replace(region, lag_ms=float(refined[0]))
+
+    def _refine_lag_with_phat(
+        self,
+        rate: int,
+        src_pcm_path: str,
+        sync_pcm_path: str,
+        *,
+        lag_ms: float,
+        start_sec: float,
+        end_sec: float,
+        src_samples: int,
+        sync_samples: int,
+        drift_ms_per_sec: float = 0.0,
+        drift_origin_sec: float = 0.0,
+    ) -> tuple[float, float, int] | None:
+        """Median of the per-probe phase-transform lags, when they agree.
+
+        One probe is not a measurement: a stretch of score or room tone can
+        correlate convincingly at the wrong place.  Several probes spread over
+        the range have no reason to agree unless the offset is real, so the
+        result is only accepted when enough of them land together.
+
+        ``drift_ms_per_sec`` aims each probe at the lag expected where it sits
+        and reports every result back at ``drift_origin_sec``, so the probes on
+        a sliding track are comparable to each other and the answer stays on
+        the same footing as ``lag_ms``.
+        """
+        cfg = self._config
+        probe = cfg.phat_refine_probe_sec
+        span = end_sec - start_sec
+        if span < probe * 2 or cfg.phat_refine_probes < 1:
+            return None
+
+        # Keep the probes clear of both ends: the first and last seconds of a
+        # track are where logos, silence and fades live.
+        margin = min(span * 0.05, 60.0)
+        low = start_sec + margin
+        high = end_sec - margin - probe
+        if high <= low:
+            low, high = start_sec, max(start_sec, end_sec - probe)
+        positions = np.linspace(low, high, max(2, cfg.phat_refine_probes))
+
+        measured: list[tuple[float, float]] = []
+        for at_sec in positions:
+            expected = lag_ms + (drift_ms_per_sec * (float(at_sec) - drift_origin_sec))
+            found = self._phat_lag_at(
+                rate,
+                src_pcm_path,
+                sync_pcm_path,
+                at_sec=float(at_sec),
+                lag_ms=expected,
+                src_samples=src_samples,
+                sync_samples=sync_samples,
+            )
+            if found is not None and found[1] >= cfg.phat_refine_min_sharpness:
+                # Report every probe at the same instant so they can be
+                # compared: what the drift model predicts is removed, what the
+                # audio adds on top is kept.
+                at_origin = found[0] - (
+                    drift_ms_per_sec * (float(at_sec) - drift_origin_sec)
+                )
+                measured.append((at_origin, found[1]))
+
+        if len(measured) < cfg.phat_refine_min_agreeing:
+            return None
+
+        lags = np.array([value for value, _sharp in measured], dtype=np.float64)
+        centre = float(np.median(lags))
+        agreeing = np.abs(lags - centre) <= cfg.phat_refine_agree_ms
+        if int(np.count_nonzero(agreeing)) < cfg.phat_refine_min_agreeing:
+            return None
+
+        sharps = np.array([sharp for _value, sharp in measured], dtype=np.float64)
+        return (
+            float(np.median(lags[agreeing])),
+            float(np.median(sharps[agreeing])),
+            int(np.count_nonzero(agreeing)),
+        )
+
+    def _phat_lag_at(
+        self,
+        rate: int,
+        src_pcm_path: str,
+        sync_pcm_path: str,
+        *,
+        at_sec: float,
+        lag_ms: float,
+        src_samples: int,
+        sync_samples: int,
+    ) -> tuple[float, float] | None:
+        """One band-limited GCC-PHAT probe, in ms on the reference timeline.
+
+        The phase transform throws the magnitude spectrum away and keeps only
+        the phase, which is what makes it indifferent to the two tracks being
+        mixed, compressed and encoded differently — the very thing that blurs
+        an envelope correlation.  It also whitens noise-only bins, so the band
+        is limited to where speech and music actually carry: below 100 Hz a
+        different bass management dominates, above 4 kHz a 224 kbps dub has
+        little left to compare.
+        """
+        cfg = self._config
+        window = int(cfg.phat_refine_probe_sec * rate)
+        search = int(cfg.phat_refine_search_sec * rate)
+        base = int(round(lag_ms / 1000.0 * rate))
+
+        src_start = int(at_sec * rate)
+        sync_start = src_start - base - search
+        sync_stop = src_start - base + window + search
+        if src_start < 0 or src_start + window > src_samples:
+            return None
+        if sync_start < 0 or sync_stop > sync_samples:
+            return None
+
+        reference = self._read_pcm_range(src_pcm_path, src_start, src_start + window)
+        candidate = self._read_pcm_range(sync_pcm_path, sync_start, sync_stop)
+        if reference.size < window or candidate.size < sync_stop - sync_start:
+            return None
+
+        found = self._phat_shift(reference, candidate, rate, search)
+        if found is None:
+            return None
+
+        shift, sharpness = found
+        return (base + search - shift) / rate * 1000.0, sharpness
+
+    def _phat_shift(
+        self,
+        reference: np.ndarray,
+        candidate: np.ndarray,
+        rate: int,
+        search: int,
+    ) -> tuple[float, float] | None:
+        """Where in ``candidate`` the ``reference`` window sits, in samples.
+
+        Returns ``(shift, sharpness)`` for the position ``shift`` inside
+        ``candidate`` at which ``reference`` starts, refined below one sample,
+        together with how far the peak stands above the rest of the surface.
+        """
+        cfg = self._config
+        a = np.asarray(reference, dtype=np.float64)
+        b = np.asarray(candidate, dtype=np.float64)
+        if a.size < 2 or b.size < a.size:
+            return None
+
+        a = a - a.mean()
+        b = b - b.mean()
+        if a.std() < 1e-6 or b.std() < 1e-6:
+            return None
+
+        size = 1
+        while size < a.size + b.size:
+            size <<= 1
+
+        cross = np.fft.rfft(b, size) * np.conj(np.fft.rfft(a, size))
+
+        frequencies = np.fft.rfftfreq(size, 1.0 / rate)
+        band = (frequencies >= cfg.phat_refine_band_low_hz) & (
+            frequencies <= min(cfg.phat_refine_band_high_hz, rate * 0.45)
+        )
+        with np.errstate(divide="ignore", invalid="ignore"):
+            cross = np.where(band, cross / np.maximum(np.abs(cross), 1e-12), 0.0)
+
+        correlation = np.fft.irfft(cross, size)[: 2 * search + 1]
+        if correlation.size < 3:
+            return None
+
+        index = int(np.argmax(correlation))
+        peak = float(correlation[index])
+        if peak <= 0.0:
+            return None
+
+        # Parabolic interpolation on the three samples around the peak takes
+        # the answer below one sample — the whole point of running this stage.
+        shift = float(index)
+        if 0 < index < correlation.size - 1:
+            left, centre, right = (
+                float(correlation[index - 1]),
+                float(correlation[index]),
+                float(correlation[index + 1]),
+            )
+            denominator = left - (2.0 * centre) + right
+            if abs(denominator) > 1e-20:
+                shift += 0.5 * (left - right) / denominator
+
+        floor = float(np.median(np.abs(correlation))) + 1e-12
+        return shift, peak / floor
+
+    def residual_offset_ms(
+        self,
+        rate: int,
+        reference: np.ndarray,
+        produced: np.ndarray,
+        *,
+        search_sec: float,
+    ) -> tuple[float, float] | None:
+        """How far ``produced`` still sits from ``reference``, in ms.
+
+        Used to check a finished file rather than to build one: both probes
+        cover the same wall-clock stretch, so a track that came out right
+        reports something near zero.  Positive means the produced audio is
+        still ahead of the reference.
+        """
+        search = int(max(0.05, search_sec) * rate)
+        window = min(reference.size, produced.size - 2 * search)
+        if window < rate or search < 1:
+            return None
+
+        found = self._phat_shift(
+            reference[:window], produced[: window + 2 * search], rate, search,
+        )
+        if found is None:
+            return None
+        shift, sharpness = found
+        return (search - shift) / rate * 1000.0, sharpness
+
+    def assess_match(
+        self,
+        result: AnalysisResult,
+        *,
+        src_duration_sec: float,
+        sync_duration_sec: float,
+    ) -> AnalysisResult:
+        """Decide whether this measurement means anything, and say why.
+
+        The analyzer cannot refuse to produce a number — correlation always has
+        a maximum — so the number has to arrive with a verdict attached.  Given
+        two unrelated films it reported ``-1820320 ms`` at confidence 1.87 and
+        offered to write the file; every signal needed to catch that was
+        already computed and none of them was consulted.
+        """
+        cfg = self._config
+        reasons: list[str] = []
+        verdict = MatchVerdict.RELIABLE
+
+        overlap = min(src_duration_sec, sync_duration_sec)
+        ceiling = cfg.match_max_offset_sec
+        if overlap > 0.0:
+            ceiling = min(ceiling, overlap * cfg.match_max_offset_fraction)
+
+        # Independent agreement at sample resolution, spread over the whole
+        # file, is stronger evidence than the envelope score it would override:
+        # nothing but the same content makes six separate probes land within
+        # 40 ms of each other.  A cross-language pair whose dub is mixed very
+        # differently scores only ~3 on the envelope correlation while the phase
+        # transform confirms it eleven times over, and calling that "doubtful"
+        # trains the user to ignore the warning that matters.
+        corroborated = (
+            result.phat_probes >= cfg.match_phat_corroboration_probes
+            and result.phat_sharpness >= cfg.phat_refine_min_sharpness
+        )
+
+        if abs(result.delay_ms) / 1000.0 > ceiling:
+            reasons.append("reason_offset_implausible")
+            verdict = MatchVerdict.NO_MATCH
+
+        if result.confidence < cfg.match_min_confidence and not corroborated:
+            reasons.append("reason_confidence_floor")
+            verdict = MatchVerdict.NO_MATCH
+
+        # Windows scattered this far apart, with *nothing* to explain the
+        # scatter, is what two different films look like.  Every clause here is
+        # load-bearing, and the frame-rate one was learned the hard way: a
+        # 24 → 23.976 pair whose offset legitimately slides five seconds across
+        # the film scatters by 866 ms and scores 2.6, which is indistinguishable
+        # from noise until you notice that a straight line explains it at an R²
+        # of 0.95 and lands exactly on a standard conversion ratio.  Rejecting
+        # that pair would have been worse than the bug this rule exists for.
+        explained = (
+            bool(result.offset_regions)
+            or result.suspected_fps_conversion is not None
+            or (
+                result.drift_ms_per_min is not None
+                and (result.drift_r2 or 0.0) >= cfg.drift_correction_min_r2
+            )
+        )
+        if (
+            not explained
+            and result.windows_disagree_ms > cfg.match_no_match_spread_ms
+            and result.phat_probes == 0
+            and result.confidence < cfg.match_uncertain_confidence
+        ):
+            reasons.append("reason_windows_incoherent")
+            verdict = MatchVerdict.NO_MATCH
+
+        if verdict is MatchVerdict.NO_MATCH:
+            return replace(
+                result,
+                verdict=verdict,
+                verdict_reasons=tuple(reasons),
+                src_duration_sec=float(src_duration_sec),
+                sync_duration_sec=float(sync_duration_sec),
+            )
+
+        if result.confidence < cfg.match_uncertain_confidence and not corroborated:
+            reasons.append("reason_confidence_low")
+            verdict = MatchVerdict.UNCERTAIN
+        if result.windows_disagree_ms >= cfg.window_disagreement_warn_ms:
+            reasons.append("reason_windows_scattered")
+            verdict = MatchVerdict.UNCERTAIN
+        if cfg.phat_refine_enabled and result.phat_probes == 0:
+            reasons.append("reason_no_sample_confirmation")
+            verdict = MatchVerdict.UNCERTAIN
+
+        return replace(
+            result,
+            verdict=verdict,
+            verdict_reasons=tuple(reasons),
+            src_duration_sec=float(src_duration_sec),
+            sync_duration_sec=float(sync_duration_sec),
         )
 
     def _locate_boundaries_in_audio(
@@ -796,6 +1271,11 @@ class AudioAnalyzer:
             )
             if (
                 result.drift_ms_per_min is None
+                # A staircase has no slope to borrow.  The fingerprint fits its
+                # line through anchors sitting at two or three different levels,
+                # so on a stepped file this reported a confident 5.9 ms/min that
+                # described nothing in the audio.
+                and not result.has_step_discontinuity
                 and fingerprint_estimate is not None
                 and candidate.anchors
                 and fingerprint_estimate.drift_ms_per_min is not None
@@ -1874,6 +2354,7 @@ class AudioAnalyzer:
                 center_frame,
                 lag_anchors,
                 float(coarse_lag),
+                fine_rate,
             )
             sync_start_guess = int(round(ref_start - predicted_lag))
             win2_start = sync_start_guess - local_steps
@@ -1944,12 +2425,25 @@ class AudioAnalyzer:
 
         return np.array(sorted(set(positions)), dtype=int)
 
-    @staticmethod
     def _predict_lag_from_anchors(
+        self,
         center_frame: float,
         lag_anchors: tuple[_LagAnchor, ...],
         fallback_lag: float,
+        fine_rate: float = 50.0,
     ) -> float:
+        """The offset expected at ``center_frame``, given the anchors around it.
+
+        Between two nearby anchors a straight line is the right guess: that is
+        what a clock difference looks like.  Between two anchors an hour apart
+        that disagree by hundreds of milliseconds it is the wrong guess, because
+        the common cause of such a gap is not a slow slide but a single edit —
+        a reel change or a differently trimmed break.  Interpolating across one
+        hands every window in between an offset that was never true anywhere,
+        which is how a genuine three-region staircase came to be measured as a
+        smooth 7 ms/min drift.  Holding the nearer anchor is right on both
+        sides of an edit and wrong only in the seconds around it.
+        """
         if not lag_anchors:
             return fallback_lag
 
@@ -1961,11 +2455,23 @@ class AudioAnalyzer:
         if center_frame >= lag_anchors[-1].center_frame:
             return float(lag_anchors[-1].lag_frame)
 
+        cfg = self._config
+        max_gap_frames = cfg.anchor_interpolation_max_gap_sec * fine_rate
+        max_jump_frames = cfg.anchor_interpolation_max_jump_ms / 1000.0 * fine_rate
+
         for left, right in zip(lag_anchors, lag_anchors[1:]):
             if left.center_frame <= center_frame <= right.center_frame:
                 span = right.center_frame - left.center_frame
                 if span <= 1e-9:
                     return float(left.lag_frame)
+                jump = abs(right.lag_frame - left.lag_frame)
+                if span > max_gap_frames and jump > max_jump_frames:
+                    nearer = (
+                        left
+                        if (center_frame - left.center_frame) <= (right.center_frame - center_frame)
+                        else right
+                    )
+                    return float(nearer.lag_frame)
                 ratio = (center_frame - left.center_frame) / span
                 return float(left.lag_frame + ((right.lag_frame - left.lag_frame) * ratio))
 
@@ -2496,6 +3002,18 @@ class AudioAnalyzer:
         # offset, so it would throw away the very windows that evidence a step.
         offset_regions = self._detect_offset_regions(segment_results, fine_rate)
 
+        lag_spread_ms = self._spread_about_model(kept, fine_rate, final_ms, offset_regions)
+
+        # A line fitted through a staircase has a slope, and it means nothing:
+        # the three-region pair below reported 7.1 ms/min at an R² of 0.96,
+        # which reads as a confident drift measurement.  The piecewise model
+        # already explains those windows, so no drift is claimed alongside it.
+        if len(offset_regions) > 1:
+            drift_ms_per_min = None
+            drift_intercept_ms = None
+            drift_r2 = None
+            drift_span_sec = 0.0
+
         return AnalysisResult(
             delay_ms=float(final_ms),
             coarse_ms=float(coarse_ms),
@@ -2509,7 +3027,51 @@ class AudioAnalyzer:
             drift_span_sec=drift_span_sec,
             offset_regions=offset_regions,
             residual_mad_ms=residual_mad_ms,
+            lag_spread_ms=lag_spread_ms,
         )
+
+    @staticmethod
+    def _spread_about_model(
+        kept: list[dict[str, float]],
+        fine_rate: float,
+        final_ms: float,
+        offset_regions: tuple[OffsetRegion, ...],
+    ) -> float:
+        """How far the validated windows sit from the offset that will be applied.
+
+        Measured against the *applied* model rather than the candidate's own
+        prediction.  Those are not the same thing: an anchored candidate is
+        fitted to its own anchors, so its residuals collapse to nothing on
+        exactly the files a single delay cannot describe — a pair whose offset
+        stepped 660 ms across three regions reported a residual spread of
+        0.0 ms.  A file that really is spliced into regions is measured against
+        those regions, because that is what the output will contain.
+        """
+        if not kept:
+            return 0.0
+
+        lags_ms = np.array(
+            [row["lag"] / fine_rate * 1000.0 for row in kept], dtype=np.float64
+        )
+        if len(offset_regions) > 1:
+            centres = np.array(
+                [
+                    AudioAnalyzer._region_lag_at(offset_regions, row["center_sec"])
+                    for row in kept
+                ],
+                dtype=np.float64,
+            )
+        else:
+            centres = np.full(lags_ms.shape, float(final_ms), dtype=np.float64)
+
+        return float(np.median(np.abs(lags_ms - centres)))
+
+    @staticmethod
+    def _region_lag_at(regions: tuple[OffsetRegion, ...], at_sec: float) -> float:
+        for region in regions:
+            if region.start_sec <= at_sec < region.end_sec:
+                return float(region.lag_ms)
+        return float(regions[-1].lag_ms)
 
     @staticmethod
     def _fit_drift_line(

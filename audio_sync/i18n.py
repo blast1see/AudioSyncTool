@@ -221,6 +221,12 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "💡  This drift matches a {name} frame-rate mismatch — turning on "
               "that FPS conversion usually gives a cleaner result.",
     },
+    "readout_no_match": {
+        "tr": "EŞLEŞME YOK — dosyalar aynı içerik değil ({ms:+.0f} ms ölçüldü, "
+              "anlamsız). Doğru çifti seçtiğinizden emin olun.",
+        "en": "NO MATCH — the files are not the same content ({ms:+.0f} ms "
+              "measured, meaningless). Check that the pair is correct.",
+    },
     "readout_scattered": {
         "tr": "  ·  pencereler ±{spread:.0f} ms ayrışıyor — tek gecikme tüm dosyayı tutmaz",
         "en": "  ·  windows disagree by ±{spread:.0f} ms — one delay will not hold",
@@ -240,6 +246,80 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "readout_steps": {
         "tr": "  ·  {count} bölge, {span:.0f} ms sıçrama",
         "en": "  ·  {count} regions, {span:.0f} ms jump",
+    },
+
+    # ── Eşleşme Kararı ──
+    "verdict_no_match": {
+        "tr": "⛔  EŞLEŞME YOK — bu iki parça aynı içerik değil. "
+              "Ölçülen gecikme anlamsızdır, senkron yapılmayacak.",
+        "en": "⛔  NO MATCH — these two tracks are not the same content. "
+              "The measured delay is meaningless; nothing will be written.",
+    },
+    "verdict_uncertain": {
+        "tr": "⚠  Ölçüm şüpheli — sonucu uygulamadan önce aşağıdaki nedenlere bakın.",
+        "en": "⚠  Measurement is doubtful — read the reasons below before applying it.",
+    },
+    "verdict_reason": {
+        "tr": "     • {reason}",
+        "en": "     • {reason}",
+    },
+    "verdict_sample_confirmed": {
+        "tr": "✓  Örnek hassasiyetinde doğrulandı: {probes} bağımsız nokta, "
+              "keskinlik {sharpness:.1f}",
+        "en": "✓  Confirmed at sample resolution: {probes} independent probes, "
+              "sharpness {sharpness:.1f}",
+    },
+    "reason_offset_implausible": {
+        "tr": "Bulunan gecikme, dosya süresine göre fiziksel olarak mümkün değil "
+              "— yanlış dosya çifti seçilmiş olabilir.",
+        "en": "The offset found is physically impossible for tracks this long — "
+              "the wrong pair of files may have been selected.",
+    },
+    "reason_confidence_floor": {
+        "tr": "Korelasyon tepesi gürültü tabanından ayırt edilemiyor.",
+        "en": "The correlation peak cannot be told apart from its own noise floor.",
+    },
+    "reason_windows_incoherent": {
+        "tr": "Pencereler birbirini tutmuyor ve hiçbir model bunu açıklamıyor.",
+        "en": "The windows contradict each other and no model explains it.",
+    },
+    "reason_confidence_low": {
+        "tr": "Korelasyon güveni düşük; ölçüm zayıf bir eşleşmeye dayanıyor.",
+        "en": "Correlation confidence is low; the measurement rests on a weak match.",
+    },
+    "reason_windows_scattered": {
+        "tr": "Pencereler tek bir gecikmede birleşmiyor.",
+        "en": "The windows do not settle on a single delay.",
+    },
+    "reason_no_sample_confirmation": {
+        "tr": "Ham ses üzerinde yapılan bağımsız doğrulama sonucu teyit edemedi.",
+        "en": "The independent check on the raw audio could not confirm the result.",
+    },
+    "pipe_verifying": {
+        "tr": "Çıktı doğrulanıyor…",
+        "en": "Verifying the written file…",
+    },
+    "pipe_verify_ok": {
+        "tr": "✓  Doğrulandı: yazılan dosya referansla {residual:+.1f} ms farkla "
+              "hizalı ({probes} nokta).",
+        "en": "✓  Verified: the written file sits {residual:+.1f} ms from the "
+              "reference ({probes} probes).",
+    },
+    "pipe_verify_off": {
+        "tr": "⚠  Doğrulama: yazılan dosyada {residual:+.1f} ms kalıntı var "
+              "({probes} nokta) — bir kareden fazla.",
+        "en": "⚠  Verification: the written file is still {residual:+.1f} ms out "
+              "({probes} probes) — more than one frame.",
+    },
+    "pipe_verify_inconclusive": {
+        "tr": "Doğrulama sonuç vermedi; dosya yazıldı ama kontrol edilemedi.",
+        "en": "Verification was inconclusive; the file was written but not checked.",
+    },
+    "err_no_match": {
+        "tr": "İki parça aynı içerik değil: ölçülen gecikme {delay:.0f} ms, "
+              "güven {confidence:.2f}. Doğru dosya çiftini seçtiğinizden emin olun.",
+        "en": "The two tracks are not the same content: measured delay {delay:.0f} ms "
+              "at confidence {confidence:.2f}. Check that the file pair is correct.",
     },
     "correct_drift": {
         "tr": "Zaman kaymasını (drift) otomatik düzelt",
