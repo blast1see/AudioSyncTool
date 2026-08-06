@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from enum import Enum
 from typing import Protocol
 
 from audio_sync.config import PcmCodec
@@ -120,6 +121,30 @@ class OffsetRegion:
         return self.start_sec / 60.0, end
 
 
+# ── Eşleşme Kararı ───────────────────────────────────────────────────────────
+
+
+class MatchVerdict(Enum):
+    """Ölçülen gecikmenin ne kadar ciddiye alınabileceği.
+
+    Korelasyon her zaman bir tepe bulur.  Bambaşka iki filmin sesi verildiğinde
+    de bulur — ölçülen bir örnekte araç, alakasız bir çift için ``-1820320 ms``
+    gibi bir sonucu tam ekran gösterip senkron düğmesini açık bıraktı.  Bu
+    yüzden "gecikme kaç" sorusunun yanında "bu iki parça gerçekten aynı içerik
+    mi" sorusunun da bir cevabı olmalı.
+
+    Attributes:
+        RELIABLE: Ölçüm tutarlı; sonuç doğrudan kullanılabilir.
+        UNCERTAIN: Eşleşme var ama tek bir gecikme dosyanın tamamını
+            tutmayabilir — kurgu farkı, drift ya da zayıf korelasyon.
+        NO_MATCH: İki parça aynı içerik değil.  Üretilen sayı anlamsızdır.
+    """
+
+    RELIABLE = "reliable"
+    UNCERTAIN = "uncertain"
+    NO_MATCH = "no_match"
+
+
 # ── Analiz Sonucu ────────────────────────────────────────────────────────────
 
 
@@ -157,14 +182,31 @@ class AnalysisResult:
     drift_span_sec: float = 0.0
     offset_regions: tuple[OffsetRegion, ...] = ()
     residual_mad_ms: float = 0.0
+    # Spread of the validated windows about ``delay_ms`` itself, in ms.  This
+    # is deliberately *not* ``residual_mad_ms``: the latter measures the fit to
+    # whichever model the winning candidate proposed, and an anchored candidate
+    # is fitted to its own anchors, so it reads ~0 on precisely the files that
+    # a single delay cannot describe.  A three-region staircase measured 0.0 ms
+    # of "disagreement" while its regions sat 660 ms apart.
+    lag_spread_ms: float = 0.0
     # Name of the frame-rate conversion that explains the pair better than no
     # conversion, when one does.  Stored as the enum member name so this module
     # does not have to import the config layer.
     suspected_fps_conversion: str | None = None
+    verdict: MatchVerdict = MatchVerdict.RELIABLE
+    # i18n keys naming what pushed the verdict down, in the order found.
+    verdict_reasons: tuple[str, ...] = ()
+    # Sample-accurate cross-check of ``delay_ms`` on the raw PCM, when one was
+    # possible: ``(refined_ms, sharpness, agreeing_probes)``.
+    phat_refined_ms: float | None = None
+    phat_sharpness: float = 0.0
+    phat_probes: int = 0
+    src_duration_sec: float = 0.0
+    sync_duration_sec: float = 0.0
 
     @property
     def windows_disagree_ms(self) -> float:
-        """Spread of the validated windows about the model that was fitted.
+        """Spread of the validated windows about the delay actually reported.
 
         This is the honest measure of how far the single reported delay can be
         trusted across the file.  A clean pair settles around 15 ms; a pair
@@ -173,7 +215,12 @@ class AnalysisResult:
         of milliseconds of disagreement, and the headline delay is then only
         right for whichever stretch of the film dominated the vote.
         """
-        return self.residual_mad_ms
+        return self.lag_spread_ms or self.residual_mad_ms
+
+    @property
+    def is_usable(self) -> bool:
+        """Whether the measurement is worth acting on at all."""
+        return self.verdict is not MatchVerdict.NO_MATCH
 
     @property
     def has_step_discontinuity(self) -> bool:
@@ -214,6 +261,15 @@ class AudioProbeError(RuntimeError):
 
 class UnsafeOutputPathError(ValueError):
     """Raised when an output path would overwrite one of the input files."""
+
+
+class NoMatchError(RuntimeError):
+    """Raised when the two tracks are not the same content.
+
+    Writing a file from such a measurement is worse than writing nothing: the
+    result is silently and hugely out of sync, and nothing in it points back at
+    the mistake that produced it.
+    """
 
 
 class EncodingError(RuntimeError):

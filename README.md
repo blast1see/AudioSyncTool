@@ -257,6 +257,56 @@ the tool will tell you that rather than hand you a file that looks fine.
 If you hit this, the usual fixes are to confirm both tracks are the same cut,
 or to sync the halves separately.
 
+#### "No match" — the two files are not the same content
+
+Cross-correlation always has a maximum, so a delay always comes out. Given the
+English audio of one film and the Turkish dub of another, the analyzer once
+reported **-1820320 ms** — a thirty-minute offset between two two-hour tracks —
+and offered to write the file.
+
+Every analysis now ends with a verdict:
+
+| Verdict | Meaning |
+|---|---|
+| **Reliable** | The measurement is consistent and independently confirmed. |
+| **Doubtful** | There is a match, but one delay may not hold across the file — read the reasons in the log. |
+| **No match** | The two tracks are not the same content. The number is meaningless. |
+
+A **no match** shows a dash instead of a delay, lists what failed, and stops the
+synchronization before anything is written. Three things trigger it: an offset
+physically impossible for tracks that length, a correlation peak
+indistinguishable from its own noise floor, or windows that contradict each
+other with nothing — no regions, no drift, no frame-rate mismatch — to explain
+it.
+
+The most common cause is simply the wrong pair of files: a source left over from
+a previous run, or the wrong stream picked out of a container.
+
+### Sample-Accurate Refinement And Output Verification
+
+The segment search works on a 20 ms feature grid, so its answer is quantised
+before any averaging. A final band-limited **GCC-PHAT** pass over the raw audio
+resolves 1/16000 s. On a two-hour cross-language pair this moved the reported
+delay from -10560 ms to **-10529 ms**, against a ground truth of -10527 — from
+three quarters of a frame out to under two milliseconds. On a film spliced into
+three regions, all three landed within 0.4 ms of ground truth.
+
+Because that pass shares no code with the envelope correlation, agreement
+between the two is also independent evidence that the answer is real. It is what
+lets the tool trust a dub mixed so differently that the envelope score stays
+around 3.
+
+After the file is written, a handful of short probes measure it against the
+reference it was aligned to, and the log reports what is left:
+
+```
+✓  Verified: the written file sits +1.9 ms from the reference (6 probes).
+```
+
+Nothing checked the output before this. A wrong measurement, a filter that
+silently did nothing, or an encoder shifting the track by its own lookahead all
+ended in the same "completed". A failing check never fails the run.
+
 ### Deew Encoding
 
 Audio Sync Tool integrates with **[deew](https://github.com/pcroland/deew)** to provide AC3 and EAC3 encoding capabilities.
@@ -629,6 +679,58 @@ yerine bunu söyleyecek.
 
 Bununla karşılaşırsanız olağan çözüm, iki parçanın aynı kurgu olduğunu
 doğrulamak veya yarımları ayrı ayrı senkronlamaktır.
+
+#### "Eşleşme yok" — iki dosya aynı içerik değil
+
+Çapraz korelasyonun her zaman bir tepesi vardır, dolayısıyla her zaman bir
+gecikme çıkar. Bir filmin İngilizce sesi ile başka bir filmin Türkçe dublajı
+verildiğinde analizci bir keresinde **-1820320 ms** bildirdi — iki saatlik iki
+parça arasında otuz dakikalık bir ofset — ve dosyayı yazmayı önerdi.
+
+Artık her analiz bir kararla bitiyor:
+
+| Karar | Anlamı |
+|---|---|
+| **Güvenilir** | Ölçüm tutarlı ve bağımsız olarak teyit edilmiş. |
+| **Şüpheli** | Eşleşme var ama tek bir gecikme dosyanın tamamını tutmayabilir — nedenleri logda. |
+| **Eşleşme yok** | İki parça aynı içerik değil. Sayı anlamsız. |
+
+**Eşleşme yok** durumunda gecikme yerine bir tire gösterilir, neyin tutmadığı
+sıralanır ve hiçbir şey yazılmadan senkronizasyon durdurulur. Üç şey bunu
+tetikler: bu uzunluktaki parçalar için fiziksel olarak imkânsız bir ofset,
+kendi gürültü tabanından ayırt edilemeyen bir korelasyon tepesi, ya da
+birbirini yalanlayan ve bunu açıklayacak hiçbir şeyi (bölge, drift, kare hızı
+uyuşmazlığı) olmayan pencereler.
+
+En yaygın nedeni basitçe yanlış dosya çiftidir: önceki çalışmadan kalan bir
+kaynak ya da kapsayıcıdan yanlış akışın seçilmesi.
+
+### Örnek Hassasiyetinde Rötuş ve Çıktı Doğrulama
+
+Segment araması 20 ms'lik bir öznitelik ızgarasında çalışır; yani cevabı
+herhangi bir ortalama alınmadan önce yuvarlanır. Ham ses üzerinde yapılan son
+bir bant sınırlı **GCC-PHAT** geçişi 1/16000 s çözünürlük verir. İki saatlik
+diller arası bir çiftte bu, bildirilen gecikmeyi -10560 ms'den **-10529 ms**'ye
+taşıdı; gerçek değer -10527 — bir karenin dörtte üçü kadar hatadan iki
+milisaniyenin altına. Üç bölgeye ayrılmış bir filmde üçünün üçü de gerçek
+değerin 0,4 ms içinde kaldı.
+
+Bu geçiş envelope korelasyonuyla hiç kod paylaşmadığı için, ikisinin uyuşması
+aynı zamanda cevabın gerçek olduğuna dair bağımsız bir kanıttır. Aracın,
+envelope skoru 3 civarında kalacak kadar farklı mikslenmiş bir dublaja
+güvenebilmesini sağlayan da budur.
+
+Dosya yazıldıktan sonra birkaç kısa sonda, dosyayı hizalandığı referansa karşı
+ölçer ve log geriye ne kaldığını bildirir:
+
+```
+✓  Doğrulandı: yazılan dosya referansla +1.9 ms farkla hizalı (6 nokta).
+```
+
+Bundan önce çıktıyı hiçbir şey kontrol etmiyordu. Yanlış bir ölçüm, sessizce
+hiçbir şey yapmayan bir filtre ya da parçayı kendi ön-belleği kadar kaydıran bir
+kodlayıcı — hepsi aynı "tamamlandı" ile bitiyordu. Başarısız olan bir kontrol,
+çalışmayı asla başarısız kılmaz.
 
 ### Deew Kodlama
 
