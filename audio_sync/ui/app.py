@@ -56,6 +56,7 @@ from audio_sync.core.models import (
     AnalysisResult,
     AudioInfo,
     EncodingError,
+    MatchVerdict,
     OperationCancelledError,
     OutputSampleRate,
 )
@@ -1303,9 +1304,14 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
     ) -> None:
         """Drive the measurement display."""
         if delay_ms is None:
-            self.delay_val.config(text="—", fg=THEME.muted)
+            # ``colour`` still applies here: the dash is also what a rejected
+            # measurement shows, and that state has to look different from
+            # "nothing has run yet".
+            self.delay_val.config(text="—", fg=colour or THEME.muted)
             self._readout_unit.config(text="")
-            self._readout_detail.config(text=detail or t("readout_idle"), fg=THEME.muted)
+            self._readout_detail.config(
+                text=detail or t("readout_idle"), fg=colour or THEME.muted,
+            )
             return
 
         self.delay_val.config(text=f"{delay_ms:+.0f}", fg=colour or THEME.accent)
@@ -2441,6 +2447,11 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
             self._log(t("analyze_result_header"))
             self._log("")
 
+            # The verdict goes first.  A reader who stops after one line should
+            # stop at "these files do not match", not at a delay figure that
+            # only means something once that question has been answered.
+            SyncPipeline._report_verdict(result, self._log)
+
             abs_ms = abs(result.delay_ms)
             hours = int(abs_ms // 3600000)
             minutes = int((abs_ms % 3600000) // 60000)
@@ -2962,12 +2973,32 @@ class AudioSyncApp(_TkBase):  # type: ignore[misc]
         # pencereler birbirinden çok ayrışıyorsa skor yüksek olsa bile sonuç
         # dosyanın tamamı için geçerli değildir — bu, skoru geçersiz kılar.
         scattered = result.windows_disagree_ms >= self._config.window_disagreement_warn_ms
-        if scattered or result.confidence < 2.0:
+        if result.verdict is MatchVerdict.NO_MATCH or scattered or result.confidence < 2.0:
             quality, quality_colour = t("confidence_weak"), THEME.err
+        elif result.verdict is MatchVerdict.UNCERTAIN:
+            quality, quality_colour = t("confidence_fair"), THEME.warn
         elif result.confidence >= 4.0:
             quality, quality_colour = t("confidence_strong"), THEME.ok
         else:
             quality, quality_colour = t("confidence_fair"), THEME.warn
+
+        # A no-match reading is not a small delay and a large one is not a big
+        # delay — it is not a delay at all.  Showing the figure in the same
+        # place, in the same type, as a real measurement is what let a pair of
+        # unrelated films read as "-1820320 ms" and look like an answer.
+        if result.verdict is MatchVerdict.NO_MATCH:
+            self.schedule(
+                lambda: self._show_readout(
+                    None,
+                    detail=t("readout_no_match", ms=result.delay_ms),
+                    colour=THEME.err,
+                ),
+            )
+            # The reasons were already logged by whichever path produced this
+            # result — the analyze worker and the pipeline both report the
+            # verdict before anything is displayed.
+            self._log(t("log_final_delay", ms=result.delay_ms, relation=relation))
+            return
 
         detail = t(
             "readout_detail",

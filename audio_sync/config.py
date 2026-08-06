@@ -543,6 +543,70 @@ class SyncConfig:
     # Temiz bir çift ~15 ms'de oturur, 100 ms yapısal bir uyuşmazlığa işaret eder.
     window_disagreement_warn_ms: float = 100.0
 
+    # ── Eşleşme güvenilirliği ────────────────────────────────────────────
+    # Analiz her zaman bir sayı üretir; o sayının *anlamlı* olup olmadığı ayrı
+    # bir sorudur.  Yanlış dosya çifti verildiğinde (ör. başka bir filmin sesi)
+    # korelasyon yine bir tepe bulur ve araç bunu kocaman bir rakam olarak
+    # gösterir.  Aşağıdaki eşikler "bu iki parça aslında eşleşmiyor" demeyi
+    # mümkün kılar.
+    #
+    # ``confidence`` korelasyon tepesinin kendi gürültü tabanına oranıdır:
+    # 1.0 saf gürültü, gerçek bir eşleşme 4'ün üzerine çıkar.  Ölçülen bir
+    # uyuşmazlık örneğinde (Children of Men sesi + L.A. Confidential dublajı)
+    # skor 1.87'de kalmıştı.
+    match_min_confidence: float = 2.5
+    match_uncertain_confidence: float = 4.0
+    # Bir dublajın gecikmesi saniyeler, en kötü ihtimalle bir iki dakikadır.
+    # Bunun ötesi ölçüm değil, yanlış eşleşmedir.
+    match_max_offset_sec: float = 600.0
+    match_max_offset_fraction: float = 0.25
+    # Basamak modeliyle açıklanamayan bu kadarlık bir saçılma, iki parçanın
+    # aynı içerik olmadığını gösterir.
+    match_no_match_spread_ms: float = 400.0
+    # Kaç bağımsız GCC-PHAT noktası aynı yerde buluşursa envelope skorunun
+    # düşüklüğü affedilir.  Farklı miksajlı bir dublaj envelope korelasyonunda
+    # 3 civarında kalırken faz dönüşümü aynı gecikmeyi 11 ayrı noktada teyit
+    # edebiliyor; bu durumda uyarı vermek gerçek uyarıları değersizleştirir.
+    match_phat_corroboration_probes: int = 6
+
+    # ── Örnek hassasiyetinde son rötuş (GCC-PHAT) ────────────────────────
+    # Segment doğrulaması ince öznitelik ızgarasında çalışır: 20 ms'lik adımlar,
+    # yani en iyi ihtimalle ±10 ms'lik bir yuvarlama.  Ölçülen bir çiftte kaba
+    # ızgara -10560 ms derken gerçek değer -10527 ms'ydi — bir karenin dörtte
+    # üçü kadar hata.  Ham PCM üzerinde faz dönüşümlü korelasyon (GCC-PHAT)
+    # bunu 0.0625 ms çözünürlüğe indirir ve aynı zamanda bağımsız bir ikinci
+    # ölçüm olduğu için sonucu doğrulamak için de kullanılır.
+    phat_refine_enabled: bool = True
+    phat_refine_probe_sec: float = 20.0
+    phat_refine_probes: int = 24
+    phat_refine_search_sec: float = 0.75
+    phat_refine_min_sharpness: float = 8.0
+    phat_refine_min_agreeing: int = 3
+    phat_refine_agree_ms: float = 40.0
+    phat_refine_band_low_hz: float = 100.0
+    phat_refine_band_high_hz: float = 4000.0
+
+    # ── Çıktı doğrulama ──────────────────────────────────────────────────
+    # Bir senkron aracının en çok eksik olan şeyi: "oldu mu?" sorusunun cevabı.
+    # Yazılan dosyadan ve referanstan aynı anlara denk gelen birkaç kısa parça
+    # okunup aralarındaki kalan fark ölçülür.  Tüm filmi yeniden çözmek yerine
+    # birkaç saniyelik sondalar kullanıldığı için maliyeti saniyeler mertebesinde.
+    verify_output_enabled: bool = True
+    verify_probe_count: int = 6
+    verify_probe_sec: float = 15.0
+    verify_search_sec: float = 2.0
+    verify_min_sharpness: float = 6.0
+    # Bir karenin (23.976 fps'de ~42 ms) altındaki kalıntı duyulmaz; bunun
+    # üzerinde kullanıcı bilmelidir.
+    verify_warn_ms: float = 40.0
+
+    # Zaman içinde birbirinden bu kadar uzak iki çıpa arasında doğrusal
+    # interpolasyon yapmak, aradaki her pencereye var olmayan bir rampa
+    # dayatır.  Dublajlarda asıl yaygın olan sürekli kayma değil, kurgudan
+    # gelen ani basamaktır; boşluk büyükse en yakın çıpanın değeri tutulur.
+    anchor_interpolation_max_gap_sec: float = 300.0
+    anchor_interpolation_max_jump_ms: float = 250.0
+
     # Kare hızı uyuşmazlığını doğrudan sınama: hedefin öznitelik akışı standart
     # oranlarla yeniden örneklenip skorlanır.  Kazanan oranın, dönüşümsüz
     # duruma göre skoru bu kat kadar iyileştirmesi gerekir.

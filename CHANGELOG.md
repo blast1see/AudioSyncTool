@@ -6,6 +6,27 @@
 
 ## English
 
+### [2.5.0] - 2026-08-06
+
+The release that lets the tool say "I don't know". Every earlier version
+answered every question, including the ones it had no business answering.
+
+#### Fixed
+- **Two unrelated films were measured, reported and offered for synchronization as if they matched.** Handed the English audio of one feature and the Turkish dub of another, the analyzer reported **-1820320 ms** — a thirty-minute offset between two two-hour tracks — printed it in the largest type on the screen and left the synchronize button enabled. Every signal needed to catch it was already being computed and none was consulted: the confidence sat at 1.87 where the noise floor is 1.0, the validated windows contradicted each other, and the offset was a quarter of the runtime. `AnalysisResult` now carries a `MatchVerdict`; the readout shows a dash and an explanation instead of a number, the log lists what failed, and the pipeline refuses to write a file (`NoMatchError`) unless the caller passes `allow_no_match`. The failure was reproduced bit for bit — coarse offset, window count, confidence, drift and final delay all identical — and is now a regression test.
+- **The "windows disagree" warning read 0.0 ms on precisely the files it exists for.** The spread was measured against whatever model the winning candidate proposed, and an anchored candidate is fitted to its own anchors, so its residuals collapse to nothing. A film whose offset stepped **660 ms** across three regions reported perfect agreement. The spread is now measured against the offset that will actually be applied — the regions when the track is spliced, the single delay otherwise.
+- **A staircase was reported as a drift.** A line fitted through three offset regions returned 7.1 ms/min at an R² of 0.96, which reads as a confident measurement of something that does not exist. No drift is claimed alongside a piecewise model, from either the segment fit or the fingerprint.
+- **Anchors invented a ramp across an edit.** Two anchors an hour apart and 670 ms adrift were interpolated linearly, handing every window in between an offset that was true nowhere in the film — which is what turned a genuine three-region staircase into a smooth slide. A wide gap with a large jump now holds the nearer anchor instead.
+
+#### Added
+- **The delay is now measured on the audio, not on the feature grid.** Everything upstream works at 50 Hz, so the answer was quantised to 20 ms before any averaging, and the coarse stage that seeds it to 80 ms. A band-limited GCC-PHAT pass over the raw samples resolves 1/16000 s. On a two-hour cross-language pair the reported delay moved from **-10560 ms to -10529 ms** against a ground truth of -10527 — from three quarters of a frame out to under two milliseconds. On a three-region film all three regions landed within **0.4 ms** of ground truth (1496.8 / 1828.7 / 2165.1 against 1497 / 1829 / 2165).
+- **That same pass doubles as independent corroboration.** It shares no code and no assumptions with the envelope correlation, so probes that agree across the film confirm the answer is real — and a dub mixed differently, which scores only 3.1 on the envelope correlation, is no longer called doubtful when eleven probes agree to within a millisecond. On unrelated audio it returns nothing, which is what makes the confirmation worth something. Where a credible drift has been measured, each probe is aimed at the lag that slope predicts for its own position, so a sliding track can be refined too.
+- **The written file is checked against the reference it targeted.** Nothing verified the output before: every stage reported its intent and the run ended with "completed" regardless of what came out. A few short probes at matching timestamps now measure the finished file, and the log reports the residual in milliseconds. Verified end to end on a two-hour pair — it measured -8.8 ms where the applied delay was independently known to be 8.4 ms off. A failing check never fails the run it was checking.
+- `MatchVerdict`, `AnalysisResult.verdict` / `verdict_reasons` / `lag_spread_ms` / `phat_refined_ms` / `phat_sharpness` / `phat_probes`, `NoMatchError`, `SyncRequest.allow_no_match`, `SyncOutcome.verified_residual_ms` / `verified_probes`, `AudioAnalyzer.assess_match()` / `residual_offset_ms()`, `FFmpegWrapper.decode_probe_mono_pcm()` / `probe_duration_sec()`.
+
+#### Verified
+- Reproduced against six feature-length pairs from disc and streaming sources. Two unrelated tracks are rejected; a clean pair reads -10529.3 ms against a ground truth of -10527; a three-region staircase is found, placed and refined to sub-millisecond accuracy; a 24 → 23.976 frame-rate pair is identified rather than rejected; a clean 5.1 pair confirms at sharpness 231 over 21 probes.
+- Ground truth for every claim above comes from an independent per-window GCC-PHAT sweep that shares no code with the analyzer.
+
 ### [2.4.1] - 2026-08-06
 
 An interface audit. v2.4.0 rebuilt the window and added several panels, and the
@@ -239,6 +260,27 @@ independent correlation that shares no code with the analyzer.
 ---
 
 ## Turkce
+
+### [2.5.0] - 2026-08-06
+
+Aracin "bilmiyorum" diyebildigi surum. Onceki her surum sorulan her soruya
+cevap veriyordu — cevap vermemesi gereken sorulara da.
+
+#### Duzeltildi
+- **Alakasiz iki film, esleziyormus gibi olculdu, raporlandi ve senkrona sunuldu.** Bir filmin Ingilizce sesi ile baska bir filmin Turkce dublaji verildiginde analizci **-1820320 ms** bildirdi — iki saatlik iki parca arasinda otuz dakikalik bir ofset — bunu ekrandaki en buyuk puntoyla yazdi ve senkron dugmesini acik birakti. Bunu yakalamak icin gereken her sinyal zaten hesaplaniyordu ve hicbirine bakilmiyordu: guven skoru, gurultu tabaninin 1.0 oldugu yerde 1.87'de kalmisti, dogrulanan pencereler birbirini yalanliyordu ve ofset toplam surenin dortte biriydi. `AnalysisResult` artik bir `MatchVerdict` tasiyor; olcum ekrani sayi yerine bir tire ve aciklama gosteriyor, log neyin tuttugunu siraliyor ve boru hatti `allow_no_match` verilmedikce dosya yazmayi reddediyor (`NoMatchError`). Hata bit bit yeniden uretildi — kaba ofset, pencere sayisi, guven, drift ve nihai gecikme birebir ayni — ve artik bir regresyon testi.
+- **"Pencereler ayrisiyor" uyarisi, tam da var olma nedeni olan dosyalarda 0.0 ms okuyordu.** Sacilma, kazanan adayin onerdigi modele gore olculuyordu; capalanmis bir aday ise kendi capalarina uydurulur, dolayisiyla artiklari sifira coker. Ofseti uc bolge boyunca **660 ms** siçrayan bir film, pencerelerin kusursuz uyustugunu bildirdi. Sacilma artik gercekten uygulanacak ofsete gore olculuyor — parca kesilecekse bolgelere, degilse tek gecikmeye.
+- **Bir merdiven, drift olarak raporlandi.** Uc ofset bolgesinden gecirilen dogru, R² 0.96 ile 7.1 ms/dk verdi; bu, var olmayan bir seyin kendinden emin olcumu gibi okunuyor. Parcali model varken artik ne segment uyumundan ne de parmak izinden drift iddia edilmiyor.
+- **Capalar, bir kurgu kesitinin uzerine olmayan bir rampa uydurdu.** Bir saat arayla duran ve 670 ms ayrisan iki capa dogrusal olarak birlestiriliyordu; aradaki her pencereye filmin hicbir yerinde dogru olmayan bir ofset dayatiliyordu. Gercek bir uc bolgeli merdiveni duzgun bir kaymaya cevirenn buydu. Genis bir bosluk buyuk bir siçrama ile birlestiginde artik en yakin capanin degeri tutuluyor.
+
+#### Eklendi
+- **Gecikme artik oznitelik izgarasinda degil, sesin kendisinde olculuyor.** Yukaridaki her sey 50 Hz'de calisiyor, yani cevap herhangi bir ortalama alinmadan once 20 ms'ye yuvarlaniyordu; onu besleyen kaba asama ise 80 ms'ye. Ham ornekler uzerinde bant sinirli bir GCC-PHAT gecisi 1/16000 s cozunurluk veriyor. Iki saatlik dillerarasi bir ciftte bildirilen gecikme **-10560 ms'den -10529 ms'ye** tasindi; gercek deger -10527 — bir karenin dortte ucu kadar hatadan iki milisaniyenin altina. Uc bolgeli bir filmde uc bolgenin ucu de gercek degerin **0.4 ms** icinde kaldi (1496.8 / 1828.7 / 2165.1 karsisinda 1497 / 1829 / 2165).
+- **Ayni gecis, bagimsiz bir teyit gorevi de goruyor.** Envelope korelasyonuyla ne kod ne varsayim paylasiyor; bu yuzden film boyunca birbirini tutan sondalar cevabin gercek oldugunu dogruluyor — ve envelope korelasyonunda ancak 3.1 alan, farkli mikslenmis bir dublaj, on bir sonda milisaniye icinde ayni yeri gosterdiginde artik "supheli" sayilmiyor. Alakasiz seste hicbir sey dondurmuyor; teyidi degerli kilan da bu. Guvenilir bir drift olculmusse her sonda, o egimin kendi konumu icin ongordugu gecikmeye nisan aliyor; boylece kayan bir parca da rotuslanabiliyor.
+- **Yazilan dosya, hedefledigi referansa karsi kontrol ediliyor.** Daha once cikti hic dogrulanmiyordu: her asama ne yapmak istedigini bildiriyor, calisma ne cikarsa ciksin "tamamlandi" ile bitiyordu. Artik eslesen zaman damgalarindan alinan birkac kisa sonda bitmis dosyayi olcuyor ve log kalan farki milisaniye cinsinden yaziyor. Iki saatlik bir ciftte uctan uca dogrulandi: uygulanan gecikmenin bagimsiz olarak 8.4 ms sapmali oldugu bilinen bir kosuda -8.8 ms olctu. Basarisiz olan bir kontrol, kontrol ettigi calismayi asla basarisiz kilmiyor.
+- `MatchVerdict`, `AnalysisResult.verdict` / `verdict_reasons` / `lag_spread_ms` / `phat_refined_ms` / `phat_sharpness` / `phat_probes`, `NoMatchError`, `SyncRequest.allow_no_match`, `SyncOutcome.verified_residual_ms` / `verified_probes`, `AudioAnalyzer.assess_match()` / `residual_offset_ms()`, `FFmpegWrapper.decode_probe_mono_pcm()` / `probe_duration_sec()`.
+
+#### Dogrulandi
+- Disk ve yayin kaynaklarindan alti tam uzunlukta cift uzerinde yeniden uretildi. Alakasiz iki parca reddediliyor; temiz bir cift, gercek degeri -10527 olan yerde -10529.3 ms okuyor; uc bolgeli bir merdiven bulunuyor, yerine oturtuluyor ve milisaniye altinda rotuslaniyor; 24 → 23.976 kare hizi ciftinin reddedilmesi yerine teshis ediliyor; temiz bir 5.1 cift 21 sondada 231 keskinlikle teyit ediliyor.
+- Yukaridaki her iddianin referans degeri, analizciyle hic kod paylasmayan bagimsiz bir pencere-bazli GCC-PHAT taramasindan geliyor.
 
 ### [2.4.1] - 2026-08-06
 
